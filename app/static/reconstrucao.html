@@ -67,9 +67,9 @@ td.sai { color: var(--error); font-weight: 600; }
              autocomplete="off">
       <select id="uf">
         <option value="">Todas as filiais</option>
-        <option value="SP">SP — 05502390000383</option>
-        <option value="CE">CE — 05502390000111</option>
-        <option value="SC">SC — 05502390000200</option>
+        <option value="SP">● SP — 05502390000383</option>
+        <option value="CE">● CE — 05502390000111</option>
+        <option value="SC">● SC — 05502390000200</option>
       </select>
       <select id="situacao">
         <option value="">Todos os itens</option>
@@ -171,7 +171,7 @@ async function carregar() {
 
   const total = linhas.length ? +linhas[0].total_geral : 0;
   fill('tbl', linhas, r => `
-    <td data-cnpj="${esc(r.cnpj)}" data-item="${esc(r.cod_item)}"><span class="chip uf">${esc(r.uf || '—')}</span></td>
+    <td data-cnpj="${esc(r.cnpj)}" data-item="${esc(r.cod_item)}">${chipUF(r.uf)}</td>
     <td class="mono">${esc(r.cod_item)}</td>
     <td class="desc">${r.descr_item ? esc(r.descr_item)
         : '<span class="muted">— sem descrição em nenhuma fonte —</span>'}</td>
@@ -196,6 +196,7 @@ async function carregar() {
     const r = linhas[i];
     if (!r) return;
     tr.classList.add('clicavel');
+    tr.dataset.uf = r.uf || '';
     tr.title = 'Ver a ficha completa do item';
     tr.onclick = () => abrirFicha(r);
   });
@@ -242,7 +243,7 @@ async function abrirFicha(item) {
         <div>
           <h2>${esc(item.descr_item || item.cod_item)}</h2>
           <div class="meta">
-            <span class="chip uf">${esc(item.uf || '—')}</span>
+            ${chipUF(item.uf)}
             código <b class="mono">${esc(item.cod_item)}</b> ·
             NCM <span class="mono">${esc(item.ncm || '—')}</span> ·
             posição em ${brDate(ate)}

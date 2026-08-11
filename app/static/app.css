@@ -1,4 +1,4 @@
-﻿/* Fiscal Precision System — tokens do DESIGN.md, sem CDN (funciona offline). */
+/* Fiscal Precision System — tokens do DESIGN.md, sem CDN (funciona offline). */
 :root {
   --surface: #f7f9fb; --surface-lowest: #ffffff; --surface-low: #f2f4f6;
   --surface-container: #eceef0; --surface-high: #e6e8ea; --surface-highest: #e0e3e5;
@@ -143,3 +143,32 @@ button:disabled { opacity: .45; cursor: default; }
   header.top { flex-wrap: wrap; }
   .desc { min-width: 180px; }
 }
+
+/* ---------- cores por filial ----------
+   Paleta categórica deliberadamente fora do vocabulário semântico: vermelho
+   é erro, verde é conforme e âmbar é atenção. Se uma filial usasse verde, a
+   leitura de "está tudo certo" competiria com "é a filial tal". Índigo, teal
+   e magenta se distinguem entre si e não significam nada por conta própria.
+   Violeta foi descartado para SC: ficava perto demais do índigo de SP sob
+   daltonismo. Ocre separava ainda melhor, mas invadia o âmbar de atenção. */
+.chip.uf   { background: var(--surface-container); color: var(--on-surface-variant); }
+.chip.uf-SP { background: #dbe3f7; color: #22376b; }
+.chip.uf-CE { background: #cfe9e9; color: #10565a; }
+.chip.uf-SC { background: #f6dcee; color: #7a1f5e; }
+
+/* Faixa na primeira célula: ajuda a varrer a tabela sem ler o texto do chip. */
+tbody tr[data-uf="SP"] td:first-child { box-shadow: inset 4px 0 0 #4a6bb5; }
+tbody tr[data-uf="CE"] td:first-child { box-shadow: inset 4px 0 0 #2a8f92; }
+tbody tr[data-uf="SC"] td:first-child { box-shadow: inset 4px 0 0 #b04a90; }
+tbody tr.clicavel[data-uf="SP"]:hover td:first-child { box-shadow: inset 4px 0 0 #22376b; }
+tbody tr.clicavel[data-uf="CE"]:hover td:first-child { box-shadow: inset 4px 0 0 #10565a; }
+tbody tr.clicavel[data-uf="SC"]:hover td:first-child { box-shadow: inset 4px 0 0 #7a1f5e; }
+
+/* Pontinho colorido para usar fora de tabela (legendas, seletores). */
+.ponto {
+  display: inline-block; width: 9px; height: 9px; border-radius: var(--r-full);
+  margin-right: 6px; vertical-align: baseline;
+}
+.ponto-SP { background: #4a6bb5; }
+.ponto-CE { background: #2a8f92; }
+.ponto-SC { background: #b04a90; }

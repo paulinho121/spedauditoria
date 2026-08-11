@@ -1,4 +1,4 @@
-﻿/* utilitários compartilhados pelas telas */
+/* utilitários compartilhados pelas telas */
 
 async function api(url) {
   const r = await fetch(url);
@@ -64,4 +64,14 @@ function ligarSair() {
     await fetch('/api/auth/logout', { method: 'POST' });
     location.href = '/login';
   });
+}
+
+/** Cor de cada filial. Uma fonte só, para tabela, legenda e gráfico não
+ *  divergirem quando alguém mexer numa delas. */
+const CORES_UF = { SP: '#4a6bb5', CE: '#2a8f92', SC: '#b04a90' };
+
+/** Chip da filial, já com a classe da cor. */
+function chipUF(uf) {
+  const u = (uf || '').toUpperCase();
+  return `<span class="chip uf${CORES_UF[u] ? ' uf-' + u : ''}">${esc(uf || '—')}</span>`;
 }

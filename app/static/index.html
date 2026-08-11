@@ -82,7 +82,8 @@
 <script src="/app.js"></script>
 <script>ligarSair();</script>
 <script>
-const UFC = { SP: '#041632', CE: '#505f76', SC: '#00a673' };
+// As cores vivem em app.js (CORES_UF) para a barra, os chips e a
+// legenda nunca divergirem.
 
 async function main() {
   let k, fil, div, terc, top;
@@ -115,7 +116,7 @@ async function main() {
   ].join('');
 
   fill('tbl-filiais', fil, f => `
-    <td><span class="chip uf">${f.uf}</span></td>
+    <td>${chipUF(f.uf)}</td>
     <td class="mono">${cnpj(f.cnpj)}</td>
     <td>${esc(f.nome)}</td>
     <td class="num">${n(f.qtd_itens)}</td>
@@ -129,13 +130,14 @@ async function main() {
 
   const tot = fil.reduce((s, f) => s + +f.valor, 0);
   document.getElementById('split').innerHTML = fil.map(f =>
-    `<span style="flex:${+f.valor};background:${UFC[f.uf] || '#75777e'}"
+    `<span style="flex:${+f.valor};background:${CORES_UF[f.uf] || '#75777e'}"
        title="${f.uf} ${money(f.valor)}">${(+f.valor / tot * 100) >= 8 ? f.uf : ''}</span>`).join('');
   document.getElementById('split-leg').innerHTML = fil.map(f =>
-    `${f.uf} ${money(f.valor)} (${(+f.valor / tot * 100).toFixed(1)}%)`).join(' &nbsp;·&nbsp; ');
+    `<span class="ponto ponto-${f.uf}"></span>${f.uf} ${money(f.valor)} `
+    + `(${(+f.valor / tot * 100).toFixed(1)}%)`).join(' &nbsp;·&nbsp; ');
 
   fill('tbl-div', div, d => `
-    <td><span class="chip uf">${d.uf}</span></td>
+    <td>${chipUF(d.uf)}</td>
     <td class="mono">${esc(d.cod_item)}</td>
     <td class="desc">${esc(d.descr_item || '')}</td>
     <td class="num">${n(d.qtd)}</td>
@@ -147,14 +149,14 @@ async function main() {
      <td class="num">${money(div.reduce((s, d) => s + +d.exposicao, 0))}</td></tr></tfoot>`);
 
   fill('tbl-terc', terc, t => `
-    <td><span class="chip uf">${t.uf}</span></td>
+    <td>${chipUF(t.uf)}</td>
     <td class="mono">${cnpj(t.cnpj)}</td>
     <td>${esc(t.depositario || '— sem cadastro 0150 —')}</td>
     <td class="num">${n(t.itens)}</td>
     <td class="num">${money(t.valor)}</td>`);
 
   fill('tbl-top', top, t => `
-    <td><span class="chip uf">${t.uf}</span></td>
+    <td>${chipUF(t.uf)}</td>
     <td class="mono">${esc(t.cod_item)}</td>
     <td class="desc">${esc(t.descr_item || '')}</td>
     <td class="num">${n(t.qtd)}</td>
