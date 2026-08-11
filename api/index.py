@@ -115,6 +115,31 @@ def entrar(email, senha):
 
 
 # ------------------------------------------------------------------ rotas
+def rota_estoque(qs):
+    """Posição do estoque numa data. Funcao STABLE: PostgREST aceita por GET."""
+    data = (qs.get("data") or [""])[0].strip()
+    if not data:
+        raise Erro("informe a data")
+    limite = min(int((qs.get("limit") or ["60"])[0]), 500)
+    offset = int((qs.get("offset") or ["0"])[0])
+    ordem = {"valor": "valor.desc", "qtd": "qtd.desc",
+             "custo": "custo_medio.desc", "codigo": "cod_item.asc"}.get(
+                 (qs.get("ordem") or ["valor"])[0], "valor.desc")
+    p = {"p_data": data, "order": ordem, "limit": limite, "offset": offset,
+         "qtd": "neq.0"}
+    uf = (qs.get("uf") or [""])[0]
+    if uf in ("SP", "CE", "SC"):
+        p["uf"] = f"eq.{uf}"
+    termo = (qs.get("q") or [""])[0].strip()
+    if termo:
+        p["busca"] = f"ilike.*{termo.upper()}*"
+    linhas = consulta_rest("rpc/estoque_em_detalhe", p)
+    total = offset + len(linhas) + (limite if len(linhas) == limite else 0)
+    for x in linhas:
+        x["total_geral"] = total
+    return linhas
+
+
 def rota_inventario(qs):
     limite = min(int((qs.get("limit") or ["60"])[0]), 500)
     offset = int((qs.get("offset") or ["0"])[0])
@@ -147,6 +172,11 @@ ROTAS = {
     "/api/top": lambda qs: consulta_rest(
         "v_inventario", {"order": "vl_item.desc", "limit": 12}),
     "/api/inventario": rota_inventario,
+    "/api/estoque": rota_estoque,
+    "/api/estoque/resumo": lambda qs: um(consulta_rest(
+        "rpc/estoque_resumo", {"p_data": (qs.get("data") or [""])[0]})),
+    "/api/datas": lambda qs: consulta_rest("v_datas_movimento",
+                                           {"order": "dt.desc"}),
     "/api/import/status": lambda qs: dict(um(consulta_rest("v_import_status")),
                                           importacao=bool(DATABASE_URL)),
     "/api/import/pendentes": lambda qs: consulta_rest(

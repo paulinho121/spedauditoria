@@ -113,6 +113,21 @@ from v_inventario order by vl_item desc limit 12
 """
 
 
+def sql_estoque(data, uf, termo, limit, offset, ordem):
+    d = data.replace("'", "")
+    w = ["qtd <> 0"]
+    if uf in ("SP", "CE", "SC"):
+        w.append(f"uf = '{uf}'")
+    if termo:
+        w.append("busca like '%" + termo.replace("'", "''").upper() + "%'")
+    cols = {"valor": "valor desc", "qtd": "qtd desc",
+            "custo": "custo_medio desc", "codigo": "cod_item"}
+    return (f"select *, count(*) over() as total_geral "
+            f"from estoque_em_detalhe(date '{d}') where {' and '.join(w)} "
+            f"order by {cols.get(ordem, 'valor desc')} "
+            f"limit {int(limit)} offset {int(offset)}")
+
+
 def sql_inventario(uf, termo, limit, offset, ordem):
     w = ["1=1"]
     if uf in ("SP", "CE", "SC"):
@@ -239,6 +254,18 @@ ROUTES = {
     "/api/divergencias": lambda qs: query(SQL_DIVERG),
     "/api/terceiros": lambda qs: query(SQL_TERCEIROS),
     "/api/top": lambda qs: query(SQL_TOP),
+    "/api/estoque": lambda qs: query(sql_estoque(
+        (qs.get("data") or ["2022-12-31"])[0],
+        (qs.get("uf") or [""])[0],
+        (qs.get("q") or [""])[0],
+        min(int((qs.get("limit") or ["60"])[0]), 500),
+        int((qs.get("offset") or ["0"])[0]),
+        (qs.get("ordem") or ["valor"])[0])),
+    "/api/estoque/resumo": lambda qs: query(
+        "select * from estoque_resumo(date '"
+        + (qs.get("data") or ["2022-12-31"])[0].replace("'", "") + "')")[0],
+    "/api/datas": lambda qs: query(
+        "select dt::text, movimentos, filiais from v_datas_movimento order by dt desc"),
     "/api/inventario": lambda qs: query(sql_inventario(
         (qs.get("uf") or [""])[0],
         (qs.get("q") or [""])[0],

@@ -1,21 +1,33 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reconstrução 31/12/2022 — Fiscal Stock</title>
+<title>Estoque por data — Fiscal Stock</title>
 <link rel="stylesheet" href="/app.css">
+<style>
+input[type=date] {
+  font: 500 14px var(--mono); padding: 9px 12px; border-radius: var(--r);
+  border: 1px solid var(--outline-variant); background: var(--surface-lowest);
+  color: var(--on-surface);
+}
+input[type=date]:focus { outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary); }
+.datas { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.datas button { padding: 5px 11px; font-size: 12px; font-family: var(--mono); }
+.datas button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+</style>
 </head>
 <body>
 
 <header class="top">
   <div>
     <h1>FISCAL STOCK</h1>
-    <div class="sub">Reconstrução histórica — data base <span class="mono">31/12/2022</span></div>
+    <div class="sub">Estoque em <span class="mono" id="rot-data">31/12/2022</span></div>
   </div>
   <nav class="tabs">
     <a href="/">Dashboard</a>
-    <a class="on" href="/reconstrucao">Reconstrução</a>
+    <a class="on" href="/reconstrucao">Estoque</a>
     <a href="/importar">Importar</a>
     <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
   </nav>
@@ -24,38 +36,44 @@
 <main>
   <div id="erro"></div>
 
-  <div class="controls">
-    <input type="search" id="q" placeholder="Filtrar por descrição, código do item ou NCM…"
-           autocomplete="off">
-    <select id="uf">
-      <option value="">Todas as filiais</option>
-      <option value="SP">SP — 05502390000383</option>
-      <option value="CE">CE — 05502390000111</option>
-      <option value="SC">SC — 05502390000200</option>
-    </select>
-    <select id="ordem">
-      <option value="valor">Maior valor</option>
-      <option value="qtd">Maior quantidade</option>
-      <option value="custo">Maior custo unitário</option>
-      <option value="codigo">Código do item</option>
-    </select>
-    <button id="limpar">Limpar</button>
-  </div>
-
   <div class="card" style="margin-bottom:16px">
-    <div class="lbl">Resultado do filtro</div>
-    <div class="val sm" id="resumo">…</div>
-    <div class="foot" id="resumo2"></div>
+    <div class="lbl">Data da posição</div>
+    <div class="controls" style="margin:12px 0 0">
+      <input type="date" id="data" value="2022-12-31" min="2022-12-31">
+      <input type="search" id="q" placeholder="Descrição, código do item ou NCM…"
+             autocomplete="off">
+      <select id="uf">
+        <option value="">Todas as filiais</option>
+        <option value="SP">SP — 05502390000383</option>
+        <option value="CE">CE — 05502390000111</option>
+        <option value="SC">SC — 05502390000200</option>
+      </select>
+      <select id="ordem">
+        <option value="valor">Maior valor</option>
+        <option value="qtd">Maior quantidade</option>
+        <option value="custo">Maior custo médio</option>
+        <option value="codigo">Código do item</option>
+      </select>
+      <button id="limpar">Limpar</button>
+    </div>
+    <div class="foot muted" style="margin-top:10px">
+      O saldo é apurado percorrendo os movimentos até a data, com custo médio
+      ponderado móvel. Saídas baixam pelo custo, não pelo valor da nota.
+    </div>
+    <div class="datas" id="datas"></div>
   </div>
 
-  <div class="wrap">
+  <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
+
+  <div class="wrap" style="margin-top:16px">
     <table id="tbl">
       <thead><tr>
         <th>UF</th><th>Código</th><th class="desc">Descrição</th><th>NCM</th>
-        <th>Un.</th><th class="num">Quantidade</th><th class="num">Custo unit.</th>
-        <th class="num">Valor total</th><th>Propriedade</th>
+        <th>Un.</th><th class="num">Quantidade</th><th class="num">Em terceiros</th>
+        <th class="num">Custo médio</th><th class="num">Valor</th>
+        <th class="num">Mov.</th><th>Último mov.</th>
       </tr></thead>
-      <tbody><tr><td colspan="9" class="skel">carregando…</td></tr></tbody>
+      <tbody><tr><td colspan="11" class="skel">carregando…</td></tr></tbody>
     </table>
   </div>
 
@@ -73,52 +91,108 @@ let offset = 0;
 const LIM = 60;
 const $ = id => document.getElementById(id);
 
-async function carregar() {
-  const p = new URLSearchParams({
-    q: $('q').value.trim(), uf: $('uf').value, ordem: $('ordem').value,
-    limit: LIM, offset
+function params() {
+  return new URLSearchParams({
+    data: $('data').value, q: $('q').value.trim(), uf: $('uf').value,
+    ordem: $('ordem').value, limit: LIM, offset
   });
-  let rows;
-  try { rows = await api('/api/inventario?' + p); } catch (e) { return falha(e); }
+}
 
-  const total = rows.length ? +rows[0].total_geral : 0;
-  const somaPg = rows.reduce((s, r) => s + +r.vl_item, 0);
-  $('resumo').textContent = `${n(total)} ${total === 1 ? 'item' : 'itens'}`;
-  $('resumo2').textContent = rows.length
-    ? `Exibindo ${n(offset + 1)}–${n(offset + rows.length)} · soma da página ${money(somaPg)}`
-    : 'Nenhum item corresponde ao filtro.';
+async function carregar() {
+  const data = $('data').value;
+  if (!data) return;
+  $('rot-data').textContent = brDate(data);
 
-  fill('tbl', rows, r => `
-    <td><span class="chip uf">${r.uf}</span></td>
+  let linhas, resumo;
+  try {
+    [linhas, resumo] = await Promise.all([
+      api('/api/estoque?' + params()),
+      api('/api/estoque/resumo?data=' + data)
+    ]);
+  } catch (e) { return falha(e); }
+
+  const filtrando = $('q').value.trim() || $('uf').value;
+  $('kpis').innerHTML = [
+    card('Itens com saldo', n(resumo.itens), `em ${brDate(data)}`),
+    card('Unidades', n(resumo.unidades), `${n(resumo.em_terceiros)} em poder de terceiros`),
+    card('Valor do estoque', money(resumo.valor), 'custo médio ponderado móvel'),
+    +resumo.negativos > 0
+      ? card('Saldo negativo', n(resumo.negativos), 'itens com quantidade < 0', 'alert')
+      : card('Saldo negativo', '0', 'nenhum item negativo', 'good'),
+    card('Último movimento', resumo.ultima_mov ? brDate(resumo.ultima_mov) : '—',
+         `${n(resumo.filiais)} estabelecimento(s)`),
+  ].join('');
+
+  const total = linhas.length ? +linhas[0].total_geral : 0;
+  fill('tbl', linhas, r => `
+    <td><span class="chip uf">${esc(r.uf || '—')}</span></td>
     <td class="mono">${esc(r.cod_item)}</td>
     <td class="desc">${esc(r.descr_item || '')}</td>
     <td class="mono">${esc(r.ncm || '—')}</td>
     <td>${esc(r.unid || '')}</td>
-    <td class="num">${n(r.qtd)}</td>
-    <td class="num">${money(r.vl_unit)}</td>
-    <td class="num"><b>${money(r.vl_item)}</b></td>
-    <td>${r.ind_prop === '1'
-        ? `<span class="chip warn" title="${esc(r.depositario || '')}">terceiros</span>`
-        : '<span class="chip ok">próprio</span>'}</td>`);
+    <td class="num">${+r.qtd < 0
+        ? `<span class="chip err">${n(r.qtd)}</span>` : n(r.qtd)}</td>
+    <td class="num">${+r.qtd_terceiros
+        ? `<span class="chip warn">${n(r.qtd_terceiros)}</span>` : '—'}</td>
+    <td class="num">${money(r.custo_medio)}</td>
+    <td class="num"><b>${money(r.valor)}</b></td>
+    <td class="num">${n(r.movimentos)}</td>
+    <td class="mono">${brDate(r.ultima_mov)}</td>`);
 
-  $('pag').textContent = total ? `página ${Math.floor(offset / LIM) + 1} de ${Math.ceil(total / LIM)}` : '';
+  $('pag').textContent = total
+    ? `${n(offset + 1)}–${n(offset + linhas.length)}${filtrando ? ' do filtro' : ''}`
+    : '';
   $('ant').disabled = offset === 0;
-  $('prox').disabled = offset + LIM >= total;
+  $('prox').disabled = linhas.length < LIM;
+}
+
+async function atalhos() {
+  let ds;
+  try { ds = await api('/api/datas'); } catch { return; }
+  const vistos = new Set();
+  const html = ds.filter(d => {
+    const m = String(d.dt).slice(0, 7);
+    if (vistos.has(m)) return false;
+    vistos.add(m); return true;
+  }).slice(0, 10).map(d =>
+    `<button data-dt="${d.dt}">${brDate(d.dt)}</button>`).join('');
+  $('datas').innerHTML = html
+    ? '<span class="muted" style="font-size:12px;align-self:center;margin-right:6px">' +
+      'datas com movimento:</span>' + html
+    : '';
+  $('datas').querySelectorAll('button').forEach(b =>
+    b.onclick = () => { $('data').value = b.dataset.dt; offset = 0; marcar(); carregar(); });
+  marcar();
+}
+
+function marcar() {
+  $('datas').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('on', b.dataset.dt === $('data').value));
+}
+
+function card(lbl, val, foot, cls) {
+  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+          <div class="val sm">${val}</div><div class="foot">${foot}</div></div>`;
 }
 
 let t;
 $('q').addEventListener('input', () => {
-  clearTimeout(t); t = setTimeout(() => { offset = 0; carregar(); }, 300);
+  clearTimeout(t); t = setTimeout(() => { offset = 0; carregar(); }, 350);
 });
 ['uf', 'ordem'].forEach(id =>
   $(id).addEventListener('change', () => { offset = 0; carregar(); }));
+$('data').addEventListener('change', () => { offset = 0; marcar(); carregar(); });
 $('limpar').onclick = () => {
-  $('q').value = ''; $('uf').value = ''; $('ordem').value = 'valor'; offset = 0; carregar();
+  $('q').value = ''; $('uf').value = ''; $('ordem').value = 'valor';
+  offset = 0; carregar();
 };
 $('ant').onclick = () => { offset = Math.max(0, offset - LIM); carregar(); };
 $('prox').onclick = () => { offset += LIM; carregar(); };
 
+const hoje = new Date().toISOString().slice(0, 10);
+$('data').max = hoje;
 carregar();
+atalhos();
 </script>
 </body>
 </html>
