@@ -1,0 +1,3 @@
+# A funcao serverless usa apenas a biblioteca padrao para ler por PostgREST.
+# psycopg entra em acao quando DATABASE_URL estiver definida (mais rapido).
+psycopg[binary]==3.3.4
