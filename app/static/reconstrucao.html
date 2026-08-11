@@ -87,9 +87,9 @@ input[type=date]:focus { outline: none; border-color: var(--primary);
         <th>UF</th><th>Código</th><th class="desc">Descrição</th><th>NCM</th>
         <th>Un.</th><th class="num">Quantidade</th><th class="num">Em terceiros</th>
         <th class="num">Custo médio</th><th class="num">Valor</th>
-        <th class="num">Mov.</th><th>Último mov.</th>
+        <th class="num">Mov.</th><th>Último mov.</th><th>Cadastro</th>
       </tr></thead>
-      <tbody><tr><td colspan="11" class="skel">carregando…</td></tr></tbody>
+      <tbody><tr><td colspan="12" class="skel">carregando…</td></tr></tbody>
     </table>
   </div>
 
@@ -150,7 +150,8 @@ async function carregar() {
   fill('tbl', linhas, r => `
     <td><span class="chip uf">${esc(r.uf || '—')}</span></td>
     <td class="mono">${esc(r.cod_item)}</td>
-    <td class="desc">${esc(r.descr_item || '')}</td>
+    <td class="desc">${r.descr_item ? esc(r.descr_item)
+        : '<span class="muted">— sem descrição em nenhuma fonte —</span>'}</td>
     <td class="mono">${esc(r.ncm || '—')}</td>
     <td>${esc(r.unid || '')}</td>
     <td class="num">${+r.qtd < 0
@@ -160,7 +161,13 @@ async function carregar() {
     <td class="num">${money(r.custo_medio)}</td>
     <td class="num"><b>${money(r.valor)}</b></td>
     <td class="num">${n(r.movimentos)}</td>
-    <td class="mono">${brDate(r.ultima_mov)}</td>`);
+    <td class="mono">${brDate(r.ultima_mov)}</td>
+    <td>${r.origem_cadastro === 'NF-e'
+        ? '<span class="chip warn" title="Item criado depois do momento zero: '
+          + 'descrição veio da nota, não do cadastro 0200">NF-e</span>'
+        : r.origem_cadastro === 'sem cadastro'
+        ? '<span class="chip err">sem cadastro</span>'
+        : `<span class="muted" style="font-size:11px">${esc(r.origem_cadastro || '')}</span>`}</td>`);
 
   $('pag').textContent = total
     ? `${n(offset + 1)}–${n(offset + linhas.length)}${filtrando ? ' do filtro' : ''}`
