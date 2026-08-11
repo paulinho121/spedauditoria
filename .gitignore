@@ -41,3 +41,6 @@ stitch_auditor_fiscal_de_estoque_2022/
 Thumbs.db
 desktop.ini
 .vercel
+
+# credenciais para configuracao manual
+VERCEL_ENV.txt
