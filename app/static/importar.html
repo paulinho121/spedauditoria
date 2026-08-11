@@ -48,8 +48,25 @@ progress { width: 100%; height: 6px; margin-top: 10px; }
 <main>
   <div id="erro"></div>
 
+  <div id="so-local" hidden class="card" style="border-color:var(--outline);background:var(--surface-low);margin-bottom:16px">
+    <div class="lbl">Importação indisponível neste ambiente</div>
+    <p style="margin:10px 0 0;font-size:14px;color:var(--on-surface-variant)">
+      Esta é a versão publicada, que só consulta. Importar exige ler arquivos do
+      seu computador e leva minutos — o servidor publicado não tem disco nem esse
+      tempo. Rode na sua máquina:
+    </p>
+    <p class="mono" style="margin:12px 0 0;background:var(--surface-container);padding:10px 12px;border-radius:var(--r);font-size:13px">
+      python -m auditoria importar "C:\caminho\dos\xmls\*.xml"
+    </p>
+    <p style="margin:10px 0 0;font-size:13px;color:var(--on-surface-variant)">
+      Ou abra <b>http://localhost:8777/importar</b> com o app local em execução.
+      As tabelas abaixo continuam mostrando o que já foi importado.
+    </p>
+  </div>
+
   <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
 
+  <div id="envio">
   <h2 class="sec">Enviar XML</h2>
   <div class="two">
     <div>
@@ -72,6 +89,8 @@ progress { width: 100%; height: 6px; margin-top: 10px; }
         o navegador trava com milhares de arquivos.
       </div>
     </div>
+  </div>
+
   </div>
 
   <div class="log" id="log" hidden></div>
@@ -135,6 +154,11 @@ async function painel() {
       api('/api/import/status'), api('/api/import/pendentes'),
       api('/api/import/cfops'), api('/api/import/notas')]);
   } catch (e) { return falha(e); }
+
+  if (k.importacao === false) {
+    document.getElementById('so-local').hidden = false;
+    document.getElementById('envio').hidden = true;
+  }
 
   const periodo = k.primeira ? `${brDate(k.primeira)} a ${brDate(k.ultima)}` : 'nenhuma nota ainda';
   $('kpis').innerHTML = [

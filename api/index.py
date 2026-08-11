@@ -147,7 +147,8 @@ ROTAS = {
     "/api/top": lambda qs: consulta_rest(
         "v_inventario", {"order": "vl_item.desc", "limit": 12}),
     "/api/inventario": rota_inventario,
-    "/api/import/status": lambda qs: um(consulta_rest("v_import_status")),
+    "/api/import/status": lambda qs: dict(um(consulta_rest("v_import_status")),
+                                          importacao=bool(DATABASE_URL)),
     "/api/import/pendentes": lambda qs: consulta_rest(
         "item_pendente", {"status": "eq.aberto", "order": "vl_total.desc", "limit": 200}),
     "/api/import/cfops": lambda qs: consulta_rest("v_cfop_nao_classificado"),

@@ -44,3 +44,4 @@ desktop.ini
 
 # credenciais para configuracao manual
 VERCEL_ENV.txt
+.env.vercel
