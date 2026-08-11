@@ -113,9 +113,15 @@ from v_inventario order by vl_item desc limit 12
 """
 
 
-def sql_estoque(data, uf, termo, limit, offset, ordem):
+def sql_estoque(data, uf, termo, limit, offset, ordem, situacao=""):
     d = data.replace("'", "")
-    w = ["qtd <> 0"]
+    # "negativo" e o unico filtro que precisa enxergar saldo <= 0; os demais
+    # ignoram itens zerados, que so poluem a lista.
+    w = ["qtd < 0"] if situacao == "negativo" else ["qtd <> 0"]
+    if situacao == "terceiros":
+        w.append("qtd_terceiros <> 0")
+    elif situacao == "proprio":
+        w.append("qtd_proprio <> 0")
     if uf in ("SP", "CE", "SC"):
         w.append(f"uf = '{uf}'")
     if termo:
@@ -260,7 +266,8 @@ ROUTES = {
         (qs.get("q") or [""])[0],
         min(int((qs.get("limit") or ["60"])[0]), 500),
         int((qs.get("offset") or ["0"])[0]),
-        (qs.get("ordem") or ["valor"])[0])),
+        (qs.get("ordem") or ["valor"])[0],
+        (qs.get("situacao") or [""])[0])),
     "/api/estoque/resumo": lambda qs: query(
         "select * from estoque_resumo(date '"
         + (qs.get("data") or ["2022-12-31"])[0].replace("'", "") + "')")[0],

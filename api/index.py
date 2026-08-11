@@ -125,8 +125,16 @@ def rota_estoque(qs):
     ordem = {"valor": "valor.desc", "qtd": "qtd.desc",
              "custo": "custo_medio.desc", "codigo": "cod_item.asc"}.get(
                  (qs.get("ordem") or ["valor"])[0], "valor.desc")
-    p = {"p_data": data, "order": ordem, "limit": limite, "offset": offset,
-         "qtd": "neq.0"}
+    situacao = (qs.get("situacao") or [""])[0]
+    p = {"p_data": data, "order": ordem, "limit": limite, "offset": offset}
+    if situacao == "negativo":
+        p["qtd"] = "lt.0"
+    else:
+        p["qtd"] = "neq.0"
+        if situacao == "terceiros":
+            p["qtd_terceiros"] = "neq.0"
+        elif situacao == "proprio":
+            p["qtd_proprio"] = "neq.0"
     uf = (qs.get("uf") or [""])[0]
     if uf in ("SP", "CE", "SC"):
         p["uf"] = f"eq.{uf}"

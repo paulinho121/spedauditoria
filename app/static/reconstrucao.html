@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -48,6 +48,12 @@ input[type=date]:focus { outline: none; border-color: var(--primary);
         <option value="CE">CE — 05502390000111</option>
         <option value="SC">SC — 05502390000200</option>
       </select>
+      <select id="situacao">
+        <option value="">Todos os itens</option>
+        <option value="negativo">Somente saldo negativo</option>
+        <option value="terceiros">Somente em poder de terceiros</option>
+        <option value="proprio">Somente em seu poder</option>
+      </select>
       <select id="ordem">
         <option value="valor">Maior valor</option>
         <option value="qtd">Maior quantidade</option>
@@ -61,6 +67,16 @@ input[type=date]:focus { outline: none; border-color: var(--primary);
       ponderado móvel. Saídas baixam pelo custo, não pelo valor da nota.
     </div>
     <div class="datas" id="datas"></div>
+  </div>
+
+  <div id="nota-neg" hidden class="card alert" style="margin-bottom:16px">
+    <div class="lbl">Saldo negativo</div>
+    <p style="margin:8px 0 0;font-size:14px">
+      Saldo negativo quase sempre significa <b>entrada faltando</b>, não estoque
+      inexistente: a saída foi escriturada e a compra correspondente não.
+      Confira se as notas de entrada do período foram importadas e se algum CFOP
+      ficou sem classificação.
+    </p>
   </div>
 
   <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
@@ -94,7 +110,7 @@ const $ = id => document.getElementById(id);
 function params() {
   return new URLSearchParams({
     data: $('data').value, q: $('q').value.trim(), uf: $('uf').value,
-    ordem: $('ordem').value, limit: LIM, offset
+    situacao: $('situacao').value, ordem: $('ordem').value, limit: LIM, offset
   });
 }
 
@@ -111,17 +127,24 @@ async function carregar() {
     ]);
   } catch (e) { return falha(e); }
 
-  const filtrando = $('q').value.trim() || $('uf').value;
+  const ativo = $('situacao').value;
+  const filtrando = $('q').value.trim() || $('uf').value || ativo;
   $('kpis').innerHTML = [
     card('Itens com saldo', n(resumo.itens), `em ${brDate(data)}`),
     card('Unidades', n(resumo.unidades), `${n(resumo.em_terceiros)} em poder de terceiros`),
     card('Valor do estoque', money(resumo.valor), 'custo médio ponderado móvel'),
     +resumo.negativos > 0
-      ? card('Saldo negativo', n(resumo.negativos), 'itens com quantidade < 0', 'alert')
+      ? card('Saldo negativo', n(resumo.negativos),
+             ativo === 'negativo' ? 'filtrando — clique para limpar'
+                                  : 'clique para ver só esses itens',
+             'alert', 'ver-negativos')
       : card('Saldo negativo', '0', 'nenhum item negativo', 'good'),
     card('Último movimento', resumo.ultima_mov ? brDate(resumo.ultima_mov) : '—',
          `${n(resumo.filiais)} estabelecimento(s)`),
   ].join('');
+
+  ligarCardNegativos();
+  document.getElementById('nota-neg').hidden = ativo !== 'negativo';
 
   const total = linhas.length ? +linhas[0].total_geral : 0;
   fill('tbl', linhas, r => `
@@ -170,20 +193,37 @@ function marcar() {
     b.classList.toggle('on', b.dataset.dt === $('data').value));
 }
 
-function card(lbl, val, foot, cls) {
-  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+function card(lbl, val, foot, cls, id) {
+  const clic = id ? ` id="${id}" role="button" tabindex="0" style="cursor:pointer"` : '';
+  return `<div class="card ${cls || ''}"${clic}><div class="lbl">${lbl}</div>
           <div class="val sm">${val}</div><div class="foot">${foot}</div></div>`;
+}
+
+/** Alterna o filtro de negativos pelo card. */
+function ligarCardNegativos() {
+  const c = document.getElementById('ver-negativos');
+  if (!c) return;
+  const alterna = () => {
+    $('situacao').value = $('situacao').value === 'negativo' ? '' : 'negativo';
+    offset = 0;
+    carregar();
+  };
+  c.onclick = alterna;
+  c.onkeydown = e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); alterna(); }
+  };
 }
 
 let t;
 $('q').addEventListener('input', () => {
   clearTimeout(t); t = setTimeout(() => { offset = 0; carregar(); }, 350);
 });
-['uf', 'ordem'].forEach(id =>
+['uf', 'ordem', 'situacao'].forEach(id =>
   $(id).addEventListener('change', () => { offset = 0; carregar(); }));
 $('data').addEventListener('change', () => { offset = 0; marcar(); carregar(); });
 $('limpar').onclick = () => {
   $('q').value = ''; $('uf').value = ''; $('ordem').value = 'valor';
+  $('situacao').value = '';
   offset = 0; carregar();
 };
 $('ant').onclick = () => { offset = Math.max(0, offset - LIM); carregar(); };
