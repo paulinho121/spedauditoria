@@ -113,6 +113,12 @@ from v_inventario order by vl_item desc limit 12
 """
 
 
+def sql_kardex(cnpj, cod_item, ate):
+    lim = lambda v: str(v).replace("'", "")[:44]
+    ate_sql = f"date '{lim(ate)}'" if ate else "null"
+    return (f"select * from kardex_item('{lim(cnpj)}', '{lim(cod_item)}', {ate_sql})")
+
+
 def sql_estoque(data, uf, termo, limit, offset, ordem, situacao=""):
     d = data.replace("'", "")
     # "negativo" e o unico filtro que precisa enxergar saldo <= 0; os demais
@@ -260,6 +266,10 @@ ROUTES = {
     "/api/divergencias": lambda qs: query(SQL_DIVERG),
     "/api/terceiros": lambda qs: query(SQL_TERCEIROS),
     "/api/top": lambda qs: query(SQL_TOP),
+    "/api/kardex": lambda qs: query(sql_kardex(
+        (qs.get("cnpj") or [""])[0],
+        (qs.get("item") or [""])[0],
+        (qs.get("ate") or [""])[0])),
     "/api/estoque": lambda qs: query(sql_estoque(
         (qs.get("data") or ["2022-12-31"])[0],
         (qs.get("uf") or [""])[0],

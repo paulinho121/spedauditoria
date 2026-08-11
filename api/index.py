@@ -179,6 +179,11 @@ ROTAS = {
     "/api/terceiros": lambda qs: consulta_rest("v_terceiros", {"order": "valor.desc"}),
     "/api/top": lambda qs: consulta_rest(
         "v_inventario", {"order": "vl_item.desc", "limit": 12}),
+    "/api/kardex": lambda qs: consulta_rest("rpc/kardex_item", {
+        "p_cnpj": (qs.get("cnpj") or [""])[0],
+        "p_cod_item": (qs.get("item") or [""])[0],
+        "p_ate": (qs.get("ate") or [""])[0] or None,
+        "order": "seq.asc"}),
     "/api/inventario": rota_inventario,
     "/api/estoque": rota_estoque,
     "/api/estoque/resumo": lambda qs: um(consulta_rest(
