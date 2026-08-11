@@ -1,0 +1,109 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+body { display: grid; place-items: center; min-height: 100vh; padding: 24px; }
+.box {
+  width: 100%; max-width: 396px; background: var(--surface-lowest);
+  border: 1px solid var(--outline-variant); border-radius: var(--r-lg);
+  padding: 32px;
+}
+.marca { text-align: center; margin-bottom: 28px; }
+.marca h1 {
+  margin: 0; font: 700 24px/1.2 var(--head); color: var(--primary);
+  letter-spacing: -.01em;
+}
+.marca p { margin: 6px 0 0; font-size: 13px; color: var(--on-surface-variant); }
+label {
+  display: block; font: 700 11px/1 var(--sans); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--on-surface-variant); margin-bottom: 7px;
+}
+input[type=email], input[type=password] {
+  width: 100%; font: 400 15px var(--sans); padding: 11px 13px;
+  border: 1px solid var(--outline-variant); border-radius: var(--r);
+  background: var(--surface-lowest); color: var(--on-surface); margin-bottom: 18px;
+}
+input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
+button[type=submit] { width: 100%; padding: 12px; font-size: 14px; }
+.aviso {
+  background: var(--error-container); color: var(--on-error-container);
+  border: 1px solid var(--error); border-radius: var(--r);
+  padding: 11px 13px; font-size: 13.5px; margin-bottom: 18px;
+}
+.rodape {
+  margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--surface-container);
+  font-size: 12px; color: var(--on-surface-variant); line-height: 1.6;
+}
+</style>
+</head>
+<body>
+
+<form class="box" id="form" autocomplete="on">
+  <div class="marca">
+    <h1>FISCAL STOCK</h1>
+    <p>Auditoria fiscal de estoque</p>
+  </div>
+
+  <div id="aviso" hidden></div>
+
+  <label for="email">E-mail</label>
+  <input type="email" id="email" name="email" required autocomplete="username"
+         autofocus placeholder="voce@empresa.com.br">
+
+  <label for="senha">Senha</label>
+  <input type="password" id="senha" name="senha" required
+         autocomplete="current-password" placeholder="••••••••">
+
+  <button type="submit" class="pri" id="btn">Entrar</button>
+
+  <div class="rodape">
+    Esta ferramenta trata dados fiscais sigilosos de terceiros. O acesso é
+    registrado.
+  </div>
+</form>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function erro(msg) {
+  const a = $('aviso');
+  a.className = 'aviso';
+  a.textContent = msg;
+  a.hidden = false;
+}
+
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('btn');
+  $('aviso').hidden = true;
+  btn.disabled = true;
+  btn.textContent = 'Entrando…';
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: $('email').value.trim(), senha: $('senha').value })
+    });
+    const d = await r.json();
+    if (!r.ok || d.erro) {
+      erro(d.erro || 'Não foi possível entrar.');
+      $('senha').value = '';
+      $('senha').focus();
+    } else {
+      const destino = new URLSearchParams(location.search).get('de') || '/';
+      location.href = destino;
+      return;
+    }
+  } catch (ex) {
+    erro('Servidor não respondeu: ' + ex.message);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Entrar';
+});
+</script>
+</body>
+</html>

@@ -54,3 +54,14 @@ function falha(e) {
   }
   document.querySelectorAll('.skel').forEach(s => s.textContent = '—');
 }
+
+/** Liga o botão Sair presente no cabeçalho das telas autenticadas. */
+function ligarSair() {
+  const b = document.getElementById('btn-sair');
+  if (!b) return;
+  b.addEventListener('click', async e => {
+    e.preventDefault();
+    await fetch('/api/auth/logout', { method: 'POST' });
+    location.href = '/login';
+  });
+}

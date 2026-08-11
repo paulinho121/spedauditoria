@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -41,6 +41,7 @@ progress { width: 100%; height: 6px; margin-top: 10px; }
     <a href="/">Dashboard</a>
     <a href="/reconstrucao">Reconstrução</a>
     <a class="on" href="/importar">Importar</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
   </nav>
 </header>
 
@@ -113,6 +114,7 @@ progress { width: 100%; height: 6px; margin-top: 10px; }
 </main>
 
 <script src="/app.js"></script>
+<script>ligarSair();</script>
 <script>
 const $ = id => document.getElementById(id);
 const log = $('log');

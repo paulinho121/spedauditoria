@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Servidor local da auditoria fiscal de estoque.
 
@@ -202,7 +202,32 @@ def importar_upload(body):
             "arquivos": [r.dict() for r in res]}
 
 
+def _auth():
+    _sobe_auditoria()
+    from auditoria import auth
+    return auth
+
+
+def entrar(body):
+    a = _auth()
+    try:
+        token, _refresh, u = a.entrar((body or {}).get("email", "").strip(),
+                                      (body or {}).get("senha", ""))
+    except a.ErroAuth as e:
+        return {"erro": str(e)}, None
+    return {"ok": True, "usuario": {"email": u.get("email")}}, token
+
+
+def sair(body, token=None):
+    _auth().sair(token)
+    return {"ok": True}, ""
+
+
 POSTS = {"/api/import/pasta": importar_pasta, "/api/import/upload": importar_upload}
+
+# Rotas que dispensam sessão. Todo o resto exige login.
+LIVRES = {"/login", "/login.html", "/app.css", "/app.js", "/favicon.ico",
+          "/api/auth/login"}
 
 ROUTES = {
     "/api/import/status": lambda qs: query(SQL_IMPORT_STATUS)[0],
@@ -241,14 +266,33 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_POST(self):
-        rota = POSTS.get(urlparse(self.path).path)
-        if not rota:
-            return self._send(404, json.dumps({"erro": "rota inexistente"}))
+        path = urlparse(self.path).path
         try:
             n = int(self.headers.get("Content-Length") or 0)
             corpo = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
         except Exception as e:
             return self._send(400, json.dumps({"erro": f"corpo inválido: {e}"}))
+
+        if path == "/api/auth/login":
+            try:
+                dados, token = entrar(corpo)
+            except Exception as e:
+                return self._send(500, json.dumps({"erro": str(e)}))
+            if token is None:
+                return self._send(401, json.dumps(dados))
+            sys.stderr.write(f"  login: {dados['usuario']['email']}\n")
+            return self._send(200, json.dumps(dados), cookie=token)
+
+        if path == "/api/auth/logout":
+            dados, _ = sair(corpo, self._token())
+            return self._send(200, json.dumps(dados), cookie="")
+
+        if not self._usuario():
+            return self._send(401, json.dumps({"erro": "sessão expirada"}))
+
+        rota = POSTS.get(path)
+        if not rota:
+            return self._send(404, json.dumps({"erro": "rota inexistente"}))
         try:
             return self._send(200, json.dumps(rota(corpo), default=str))
         except Exception as e:
@@ -256,19 +300,61 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             return self._send(500, json.dumps({"erro": f"{type(e).__name__}: {e}"}))
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    COOKIE = "fs_sessao"
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8",
+              cookie=None, extra=None):
         if isinstance(body, str):
             body = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")
+        if cookie is not None:
+            if cookie:
+                self.send_header(
+                    "Set-Cookie",
+                    f"{self.COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200")
+            else:
+                self.send_header(
+                    "Set-Cookie",
+                    f"{self.COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    def _token(self):
+        from http.cookies import SimpleCookie
+        bruto = self.headers.get("Cookie")
+        if not bruto:
+            return None
+        try:
+            c = SimpleCookie()
+            c.load(bruto)
+            m = c.get(self.COOKIE)
+            return m.value if m else None
+        except Exception:
+            return None
+
+    def _usuario(self):
+        return _auth().usuario(self._token())
 
     def do_GET(self):
         u = urlparse(self.path)
         path, qs = u.path, parse_qs(u.query)
+
+        if path not in LIVRES and not self._usuario():
+            if path.startswith("/api/"):
+                return self._send(401, json.dumps({"erro": "sessão expirada"}))
+            from urllib.parse import quote
+            return self._send(302, b"", "text/plain",
+                              extra={"Location": f"/login?de={quote(path)}"})
+
+        if path == "/api/auth/me":
+            return self._send(200, json.dumps({"usuario": self._usuario()}))
 
         if path in ROUTES:
             try:
@@ -283,6 +369,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/reconstrucao.html"
         if path == "/importar":
             path = "/importar.html"
+        if path == "/login":
+            path = "/login.html"
 
         alvo = os.path.normpath(os.path.join(STATIC, path.lstrip("/")))
         if not alvo.startswith(STATIC) or not os.path.isfile(alvo):

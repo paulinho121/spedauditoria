@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -17,6 +17,7 @@
     <a href="/">Dashboard</a>
     <a class="on" href="/reconstrucao">Reconstrução</a>
     <a href="/importar">Importar</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
   </nav>
 </header>
 
@@ -66,6 +67,7 @@
 </main>
 
 <script src="/app.js"></script>
+<script>ligarSair();</script>
 <script>
 let offset = 0;
 const LIM = 60;

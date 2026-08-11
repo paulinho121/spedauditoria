@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -17,6 +17,7 @@
     <a class="on" href="/">Dashboard</a>
     <a href="/reconstrucao">Reconstrução</a>
     <a href="/importar">Importar</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
   </nav>
 </header>
 
@@ -79,6 +80,7 @@
 </main>
 
 <script src="/app.js"></script>
+<script>ligarSair();</script>
 <script>
 const UFC = { SP: '#041632', CE: '#505f76', SC: '#00a673' };
 
