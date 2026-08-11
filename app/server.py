@@ -264,6 +264,12 @@ ROUTES = {
     "/api/kpis": lambda qs: query(SQL_KPIS)[0],
     "/api/filiais": lambda qs: query(SQL_FILIAIS),
     "/api/divergencias": lambda qs: query(SQL_DIVERG),
+    "/api/divergencias/detalhe": lambda qs: query(
+        "select * from v_divergencia_detalhe order by exposicao desc"),
+    "/api/divergencias/documentos": lambda qs: query(
+        "select * from divergencia_documentos('"
+        + (qs.get("cnpj") or [""])[0].replace("'", "") + "','"
+        + (qs.get("item") or [""])[0].replace("'", "") + "')"),
     "/api/terceiros": lambda qs: query(SQL_TERCEIROS),
     "/api/top": lambda qs: query(SQL_TOP),
     "/api/kardex": lambda qs: query(sql_kardex(

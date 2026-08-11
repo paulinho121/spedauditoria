@@ -17,28 +17,6 @@ input[type=date]:focus { outline: none; border-color: var(--primary);
 .datas button { padding: 5px 11px; font-size: 12px; font-family: var(--mono); }
 .datas button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
 
-.ficha-fundo {
-  position: fixed; inset: 0; background: rgba(4,22,50,.5); z-index: 90;
-  display: flex; justify-content: flex-end;
-}
-.ficha {
-  background: var(--surface); width: min(1100px, 96vw); height: 100%;
-  overflow-y: auto; box-shadow: -8px 0 32px rgba(0,0,0,.2);
-  border-left: 1px solid var(--outline-variant);
-}
-.ficha-topo {
-  position: sticky; top: 0; background: var(--surface-lowest); z-index: 2;
-  border-bottom: 1px solid var(--outline-variant); padding: var(--md) var(--lg);
-  display: flex; align-items: flex-start; gap: var(--md);
-}
-.ficha-topo h2 { margin: 0 0 4px; font: 600 19px/1.25 var(--head); color: var(--primary); }
-.ficha-topo .meta { font-size: 13px; color: var(--on-surface-variant); }
-.ficha-corpo { padding: var(--lg); }
-.ficha-fechar { margin-left: auto; }
-tr.clicavel { cursor: pointer; }
-tr.clicavel:hover td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
-td.ent { color: var(--success-dark); font-weight: 600; }
-td.sai { color: var(--error); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -236,32 +214,10 @@ function marcar() {
 // ---------------------------------------------------------------- ficha do item
 async function abrirFicha(item) {
   const ate = $('data').value;
-  const fundo = document.createElement('div');
-  fundo.className = 'ficha-fundo';
-  fundo.innerHTML = `<div class="ficha">
-      <div class="ficha-topo">
-        <div>
-          <h2>${esc(item.descr_item || item.cod_item)}</h2>
-          <div class="meta">
-            ${chipUF(item.uf)}
-            código <b class="mono">${esc(item.cod_item)}</b> ·
-            NCM <span class="mono">${esc(item.ncm || '—')}</span> ·
-            posição em ${brDate(ate)}
-          </div>
-        </div>
-        <button class="ficha-fechar" id="fechar-ficha">Fechar</button>
-      </div>
-      <div class="ficha-corpo"><div class="skel">carregando a ficha…</div></div>
-    </div>`;
-  document.body.appendChild(fundo);
-
-  const fechar = () => { fundo.remove(); document.removeEventListener('keydown', esc2); };
-  const esc2 = e => { if (e.key === 'Escape') fechar(); };
-  document.addEventListener('keydown', esc2);
-  fundo.onclick = e => { if (e.target === fundo) fechar(); };
-  fundo.querySelector('#fechar-ficha').onclick = fechar;
-
-  const corpo = fundo.querySelector('.ficha-corpo');
+  const { corpo } = abrirPainel(
+    esc(item.descr_item || item.cod_item),
+    `${chipUF(item.uf)} código <b class="mono">${esc(item.cod_item)}</b> · ` +
+    `NCM <span class="mono">${esc(item.ncm || '—')}</span> · posição em ${brDate(ate)}`);
   let mov;
   try {
     mov = await api(`/api/kardex?cnpj=${encodeURIComponent(item.cnpj)}` +

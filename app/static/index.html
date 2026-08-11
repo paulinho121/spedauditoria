@@ -103,17 +103,23 @@ async function main() {
     card('Valor total do estoque', money(k.valor), 'somatório dos registros H010'),
     +k.div_itens > 0
       ? card('Divergência de valoração', money(k.div_exposicao),
-             `${k.div_itens} itens — revisão imediata`, 'alert')
+             `${k.div_itens} itens — ver o motivo`, 'alert', 'ver-diverg')
       : card('Divergência de valoração', 'R$ 0,00', 'nenhuma apontada', 'good'),
     card('Em poder de terceiros', money(k.em_terceiros),
-         pct(k.em_terceiros, k.valor) + ' do estoque', 'alert'),
+         pct(k.em_terceiros, k.valor) + ' do estoque · ver itens',
+         'alert', 'ver-terceiros'),
     confOk
-      ? card('Conferência H005 × H010', `${k.conf_ok}/${k.conf_total}`, 'diferença R$ 0,00', 'good')
+      ? card('Conferência H005 × H010', `${k.conf_ok}/${k.conf_total}`,
+             'diferença R$ 0,00 · ver por filial', 'good', 'ver-conf')
       : card('Conferência H005 × H010', `${k.conf_ok}/${k.conf_total}`, 'há diferenças', 'alert'),
     +k.negativos > 0
       ? card('Estoque negativo', n(k.negativos), 'itens com quantidade < 0', 'alert')
       : card('Estoque negativo', '0', 'nenhum item negativo', 'good'),
   ].join('');
+
+  aoAbrir('ver-diverg', painelDivergencias);
+  aoAbrir('ver-terceiros', painelTerceiros);
+  aoAbrir('ver-conf', painelConferencia);
 
   fill('tbl-filiais', fil, f => `
     <td>${chipUF(f.uf)}</td>
@@ -164,9 +170,163 @@ async function main() {
     <td class="num">${money(t.vl_item)}</td>`);
 }
 
-function card(lbl, val, foot, cls) {
-  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+function card(lbl, val, foot, cls, id) {
+  const c = id ? ` clicavel" id="${id}" role="button" tabindex="0` : '';
+  return `<div class="card ${cls || ''}${c}"><div class="lbl">${lbl}</div>
           <div class="val">${val}</div><div class="foot">${foot}</div></div>`;
+}
+
+/** Liga um card ao seu painel, por clique ou teclado. */
+function aoAbrir(id, fn) {
+  const c = document.getElementById(id);
+  if (!c) return;
+  c.onclick = fn;
+  c.onkeydown = e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); }
+  };
+}
+
+// ------------------------------------------------ divergencias de valoracao
+async function painelDivergencias() {
+  const { corpo } = abrirPainel('Divergências de valoração',
+    'Custo inventariado em 31/12/2022 confrontado com o custo real de entrada, '
+    + 'documentado por nota fiscal');
+  let itens;
+  try { itens = await api('/api/divergencias/detalhe'); }
+  catch (e) { corpo.innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
+
+  const total = itens.reduce((a, x) => a + +x.exposicao, 0);
+  corpo.innerHTML = `
+    <section class="grid kpis" style="margin-bottom:18px">
+      <div class="card alert"><div class="lbl">Exposição total</div>
+        <div class="val sm">${money(total)}</div></div>
+      <div class="card"><div class="lbl">Itens afetados</div>
+        <div class="val sm">${n(itens.length)}</div></div>
+    </section>
+    ${itens.map((x, i) => `
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+          ${chipUF(x.uf)}
+          <b class="mono">${esc(x.cod_item)}</b>
+          <span style="flex:1 1 320px">${esc((x.descr_item || '').slice(0, 88))}</span>
+          <b style="color:var(--error);font-size:15px">${money(x.exposicao)}</b>
+        </div>
+        <div class="motivo">${esc(x.motivo)}</div>
+        <div class="wrap"><table><thead><tr>
+          <th class="num">Qtd em 31/12</th><th class="num">Custo inventariado</th>
+          <th class="num">Custo de entrada</th><th class="num">Múltiplo</th>
+          <th class="num">Valor se revalorado</th>
+        </tr></thead><tbody><tr>
+          <td class="num">${n(x.qtd)}</td>
+          <td class="num">${money(x.custo_inventario)}</td>
+          <td class="num">${money(x.custo_entrada)}</td>
+          <td class="num"><span class="chip err">${(+x.multiplo).toFixed(0)}×</span></td>
+          <td class="num"><b>${money(x.valor_revalorado)}</b></td>
+        </tr></tbody></table></div>
+        <div class="prova">
+          prova: linha ${x.linha_arquivo} de ${esc((x.nome_arquivo || '').slice(0, 46))}
+          · sha ${esc(x.sha_arquivo || '')}…
+          · CFOP ${esc(x.cfops || '—')} · ${n(x.documentos)} documento(s)
+        </div>
+        <button class="doc-btn" data-cnpj="${esc(x.cnpj)}" data-item="${esc(x.cod_item)}"
+                data-i="${i}" style="margin-top:10px">Ver notas fiscais</button>
+        <div id="docs-${i}"></div>
+      </div>`).join('')}`;
+
+  corpo.querySelectorAll('.doc-btn').forEach(b => b.onclick = async () => {
+    const alvo = document.getElementById('docs-' + b.dataset.i);
+    if (alvo.innerHTML) { alvo.innerHTML = ''; b.textContent = 'Ver notas fiscais'; return; }
+    b.textContent = 'carregando…';
+    let ds;
+    try {
+      ds = await api('/api/divergencias/documentos?cnpj='
+                     + encodeURIComponent(b.dataset.cnpj)
+                     + '&item=' + encodeURIComponent(b.dataset.item));
+    } catch (e) {
+      b.textContent = 'Ver notas fiscais';
+      alvo.innerHTML = `<div class="err-box">${esc(e.message)}</div>`;
+      return;
+    }
+    b.textContent = 'Ocultar notas fiscais';
+    alvo.innerHTML = `<div class="wrap" style="margin-top:10px"><table><thead><tr>
+      <th>NF</th><th>Emissão</th><th>CFOP</th><th class="desc">Natureza do CFOP</th>
+      <th class="desc">Parceiro</th><th class="num">Qtd</th>
+      <th class="num">Valor</th><th class="num">Custo unit.</th>
+      </tr></thead><tbody>${ds.map(d => `<tr>
+        <td class="mono">${esc(d.num_doc || '')}/${esc(d.serie || '')}</td>
+        <td class="mono">${brDate(d.dt_doc)}</td>
+        <td class="mono">${esc(d.cfop || '')}</td>
+        <td class="desc">${esc(d.cfop_descr || '—')}</td>
+        <td class="desc">${esc((d.parceiro || '—').slice(0, 32))}</td>
+        <td class="num">${n(d.qtd)}</td>
+        <td class="num">${money(d.vl_item)}</td>
+        <td class="num"><b>${money(d.custo_unit)}</b></td>
+      </tr>`).join('')}</tbody></table></div>`;
+  });
+}
+
+// ----------------------------------------------------- em poder de terceiros
+async function painelTerceiros() {
+  const { corpo } = abrirPainel('Estoque em poder de terceiros',
+    'Mercadoria que continua sendo da empresa, mas está fisicamente com outro');
+  let linhas;
+  try { linhas = await api('/api/inventario?limit=500'); }
+  catch (e) { corpo.innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
+  const terc = linhas.filter(r => r.ind_prop === '1');
+  const total = terc.reduce((a, x) => a + +x.vl_item, 0);
+  corpo.innerHTML = `
+    <section class="grid kpis" style="margin-bottom:18px">
+      <div class="card alert"><div class="lbl">Valor</div>
+        <div class="val sm">${money(total)}</div></div>
+      <div class="card"><div class="lbl">Itens</div>
+        <div class="val sm">${n(terc.length)}</div></div>
+      <div class="card"><div class="lbl">Depositário</div>
+        <div class="val sm" style="font-size:13px;line-height:1.4">${
+          esc(terc[0] ? (terc[0].depositario || '—') : '—')}</div></div>
+    </section>
+    <div class="motivo" style="border-left-color:var(--warn-fg)">
+      Estes itens não estão no estabelecimento. A existência deles depende de
+      confirmação junto ao depositário — o inventário sozinho não comprova a
+      posse, apenas a declara.
+    </div>
+    <div class="wrap"><table><thead><tr>
+      <th>UF</th><th>Código</th><th class="desc">Descrição</th>
+      <th class="num">Qtd</th><th class="num">Custo unit.</th><th class="num">Valor</th>
+      </tr></thead><tbody>${terc.map(r => `<tr>
+        <td>${chipUF(r.uf)}</td><td class="mono">${esc(r.cod_item)}</td>
+        <td class="desc">${esc(r.descr_item || '')}</td>
+        <td class="num">${n(r.qtd)}</td><td class="num">${money(r.vl_unit)}</td>
+        <td class="num"><b>${money(r.vl_item)}</b></td>
+      </tr>`).join('')}</tbody></table></div>`;
+}
+
+// -------------------------------------------------------------- conferencia
+async function painelConferencia() {
+  const { corpo } = abrirPainel('Conferência H005 × H010',
+    'Soma dos itens do inventário confrontada com o total declarado ao Fisco');
+  let fil;
+  try { fil = await api('/api/filiais'); }
+  catch (e) { corpo.innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
+  corpo.innerHTML = `
+    <div class="motivo" style="border-left-color:var(--success)">
+      O registro H005 declara o valor total do inventário; os H010 detalham item
+      a item. Se a soma dos H010 não bate com o H005, o arquivo entregue ao Fisco
+      é internamente inconsistente. Aqui bate nas três inscrições, com diferença
+      de R$ 0,00.
+    </div>
+    <div class="wrap"><table><thead><tr>
+      <th>UF</th><th>CNPJ</th><th>Estabelecimento</th><th class="num">Itens</th>
+      <th class="num">Soma dos H010</th><th class="num">Declarado no H005</th>
+      <th class="num">Diferença</th><th>Situação</th>
+      </tr></thead><tbody>${fil.map(f => `<tr>
+        <td>${chipUF(f.uf)}</td><td class="mono">${cnpj(f.cnpj)}</td>
+        <td>${esc(f.nome)}</td><td class="num">${n(f.qtd_itens)}</td>
+        <td class="num">${money(f.valor)}</td><td class="num">${money(f.declarado)}</td>
+        <td class="num">${money(f.diferenca)}</td>
+        <td>${Math.abs(+f.diferenca) < 0.005
+            ? '<span class="chip ok">confere</span>'
+            : '<span class="chip err">divergente</span>'}</td>
+      </tr>`).join('')}</tbody></table></div>`;
 }
 main();
 </script>

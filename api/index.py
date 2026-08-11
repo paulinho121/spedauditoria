@@ -177,6 +177,12 @@ ROTAS = {
     "/api/divergencias": lambda qs: consulta_rest(
         "v_custo_inventario_vs_entrada", {"order": "exposicao.desc"}),
     "/api/terceiros": lambda qs: consulta_rest("v_terceiros", {"order": "valor.desc"}),
+    "/api/divergencias/detalhe": lambda qs: consulta_rest(
+        "v_divergencia_detalhe", {"order": "exposicao.desc"}),
+    "/api/divergencias/documentos": lambda qs: consulta_rest(
+        "rpc/divergencia_documentos", {
+            "p_cnpj": (qs.get("cnpj") or [""])[0],
+            "p_cod_item": (qs.get("item") or [""])[0]}),
     "/api/top": lambda qs: consulta_rest(
         "v_inventario", {"order": "vl_item.desc", "limit": 12}),
     "/api/kardex": lambda qs: consulta_rest("rpc/kardex_item", {

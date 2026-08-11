@@ -172,3 +172,42 @@ tbody tr.clicavel[data-uf="SC"]:hover td:first-child { box-shadow: inset 4px 0 0
 .ponto-SP { background: #4a6bb5; }
 .ponto-CE { background: #2a8f92; }
 .ponto-SC { background: #b04a90; }
+
+/* ---------- painel lateral de detalhe ----------
+   Usado pela ficha do item e pelos cards do dashboard. Fica no CSS comum
+   para as duas telas nao divergirem. */
+.painel-fundo {
+  position: fixed; inset: 0; background: rgba(4,22,50,.5); z-index: 90;
+  display: flex; justify-content: flex-end;
+}
+.painel {
+  background: var(--surface); width: min(1100px, 96vw); height: 100%;
+  overflow-y: auto; box-shadow: -8px 0 32px rgba(0,0,0,.2);
+  border-left: 1px solid var(--outline-variant);
+}
+.painel-topo {
+  position: sticky; top: 0; background: var(--surface-lowest); z-index: 2;
+  border-bottom: 1px solid var(--outline-variant); padding: var(--md) var(--lg);
+  display: flex; align-items: flex-start; gap: var(--md);
+}
+.painel-topo h2 { margin: 0 0 4px; font: 600 19px/1.25 var(--head); color: var(--primary); }
+.painel-topo .meta { font-size: 13px; color: var(--on-surface-variant); }
+.painel-corpo { padding: var(--lg); }
+.painel-fechar { margin-left: auto; }
+
+.card.clicavel { cursor: pointer; }
+.card.clicavel:hover { border-color: var(--primary); }
+.card.clicavel .foot::after { content: " ›"; font-weight: 700; }
+
+.motivo {
+  background: var(--surface-lowest); border: 1px solid var(--outline-variant);
+  border-left: 4px solid var(--error); border-radius: var(--r);
+  padding: 12px 14px; margin: 10px 0 14px; font-size: 13.5px; line-height: 1.55;
+}
+.prova {
+  font-size: 12px; color: var(--on-surface-variant); font-family: var(--mono);
+  margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--outline-variant);
+}
+tr.clicavel { cursor: pointer; }
+td.ent { color: var(--success-dark); font-weight: 600; }
+td.sai { color: var(--error); font-weight: 600; }

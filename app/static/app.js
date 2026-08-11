@@ -75,3 +75,26 @@ function chipUF(uf) {
   const u = (uf || '').toUpperCase();
   return `<span class="chip uf${CORES_UF[u] ? ' uf-' + u : ''}">${esc(uf || '—')}</span>`;
 }
+
+
+/** Painel lateral de detalhe. Devolve o elemento do corpo, para quem chamou
+ *  preencher depois de buscar os dados. Fecha por Esc, clique fora ou botao. */
+function abrirPainel(titulo, meta) {
+  const fundo = document.createElement('div');
+  fundo.className = 'painel-fundo';
+  fundo.innerHTML = `<div class="painel" role="dialog" aria-modal="true">
+      <div class="painel-topo">
+        <div><h2>${titulo}</h2><div class="meta">${meta || ''}</div></div>
+        <button class="painel-fechar">Fechar</button>
+      </div>
+      <div class="painel-corpo"><div class="skel">carregando…</div></div>
+    </div>`;
+  document.body.appendChild(fundo);
+  const fechar = () => { fundo.remove(); document.removeEventListener('keydown', tecla); };
+  const tecla = e => { if (e.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', tecla);
+  fundo.onclick = e => { if (e.target === fundo) fechar(); };
+  fundo.querySelector('.painel-fechar').onclick = fechar;
+  fundo.querySelector('.painel-fechar').focus();
+  return { corpo: fundo.querySelector('.painel-corpo'), fechar };
+}
