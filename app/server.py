@@ -285,6 +285,61 @@ MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
         ".js": "application/javascript; charset=utf-8", ".svg": "image/svg+xml"}
 
 
+def vigia_arquivos(intervalo=1.0):
+    """
+    Reinicia o processo quando um .py do projeto muda.
+
+    Sem isto, editar o servidor e esquecer de reiniciá-lo faz a interface nova
+    conversar com a lógica antiga. O sintoma não parece um servidor velho:
+    parece funcionalidade quebrada. Aconteceu com o filtro de saldo negativo,
+    que devolvia a lista inteira porque o processo em memória não conhecia o
+    parâmetro que a página passou a enviar.
+
+    Antes de reiniciar, confere se o arquivo compila. Editor salvando pela
+    metade, ou erro de sintaxe, derrubaria o servidor num ciclo de reinícios.
+    """
+    import threading
+
+    raiz = os.path.dirname(HERE)
+    alvos = [os.path.join(HERE, "server.py")]
+    pasta = os.path.join(raiz, "auditoria")
+    if os.path.isdir(pasta):
+        alvos += [os.path.join(pasta, f)
+                  for f in sorted(os.listdir(pasta)) if f.endswith(".py")]
+    marca = {a: os.path.getmtime(a) for a in alvos if os.path.exists(a)}
+
+    def laco():
+        while True:
+            time.sleep(intervalo)
+            for alvo in list(marca):
+                try:
+                    agora = os.path.getmtime(alvo)
+                except OSError:
+                    continue
+                if agora == marca[alvo]:
+                    continue
+                marca[alvo] = agora
+                nome = os.path.basename(alvo)
+                try:
+                    # compile() nao escreve nada. py_compile com cfile=os.devnull
+                    # falha no Windows: 'nul' nao e arquivo regular, a checagem
+                    # errava sempre e a recarga nunca acontecia.
+                    with open(alvo, "rb") as fh:
+                        compile(fh.read(), alvo, "exec")
+                except (SyntaxError, ValueError) as e:
+                    sys.stderr.write(
+                        "\n  " + nome + " nao compila — servidor mantido no ar\n"
+                        "    " + type(e).__name__ + ": " + str(e)[:160] + "\n\n")
+                    sys.stderr.flush()
+                    continue
+                sys.stderr.write("\n  " + nome + " mudou — reiniciando\n\n")
+                sys.stderr.flush()
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    threading.Thread(target=laco, daemon=True).start()
+    return len(marca)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -422,6 +477,11 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"AVISO: nao consegui falar com o banco agora ({e}).")
         print("O servidor sobe assim mesmo; o painel mostra o erro na tela.")
+    if os.environ.get("SEM_RELOAD"):
+        print("  Recarga automatica: desligada (SEM_RELOAD)")
+    else:
+        print(f"  Recarga automatica: vigiando {vigia_arquivos()} arquivos .py")
     print(f"\n  Auditoria Fiscal de Estoque")
     print(f"  http://localhost:{PORT}\n")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+# toque para testar a recarga automatica
