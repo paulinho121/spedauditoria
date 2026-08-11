@@ -1,0 +1,170 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auditoria Fiscal de Estoque — 31/12/2022</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Auditoria de estoque — data base <span class="mono" id="dtbase">…</span></div>
+  </div>
+  <nav class="tabs">
+    <a class="on" href="/">Dashboard</a>
+    <a href="/reconstrucao">Reconstrução</a>
+    <a href="/importar">Importar</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <h2 class="sec">Posição consolidada <small id="fonte"></small></h2>
+  <section class="grid kpis" id="kpis">
+    <div class="skel">carregando…</div>
+  </section>
+
+  <h2 class="sec">Conferência por estabelecimento <small>soma dos H010 confrontada com o VL_INV declarado no H005</small></h2>
+  <div class="wrap">
+    <table id="tbl-filiais">
+      <thead><tr>
+        <th>UF</th><th>CNPJ</th><th>Estabelecimento</th>
+        <th class="num">Itens</th><th class="num">Quantidade</th>
+        <th class="num">Valor apurado</th><th class="num">Declarado H005</th>
+        <th class="num">Diferença</th><th>Situação</th>
+      </tr></thead>
+      <tbody><tr><td colspan="9" class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2 class="sec">Distribuição do valor</h2>
+  <div class="card"><div class="split" id="split"></div>
+    <div class="foot muted" style="margin-top:8px" id="split-leg"></div></div>
+
+  <h2 class="sec">Divergências de valoração
+    <small>custo inventariado em 31/12/2022 x custo real de entrada em fev/2023</small></h2>
+  <div class="wrap">
+    <table id="tbl-div">
+      <thead><tr>
+        <th>UF</th><th>Código</th><th class="desc">Produto</th>
+        <th class="num">Qtd</th><th class="num">Custo 31/12</th>
+        <th class="num">Entrada fev/23</th><th class="num">Múltiplo</th>
+        <th class="num">Exposição</th>
+      </tr></thead>
+      <tbody><tr><td colspan="8" class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2 class="sec">Estoque em poder de terceiros <small>IND_PROP = 1</small></h2>
+  <div class="wrap">
+    <table id="tbl-terc">
+      <thead><tr><th>UF</th><th>CNPJ</th><th>Depositário</th>
+        <th class="num">Itens</th><th class="num">Valor</th></tr></thead>
+      <tbody><tr><td colspan="5" class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2 class="sec">Maiores itens do inventário</h2>
+  <div class="wrap">
+    <table id="tbl-top">
+      <thead><tr><th>UF</th><th>Código</th><th class="desc">Produto</th>
+        <th class="num">Qtd</th><th class="num">Custo unit.</th><th class="num">Valor</th></tr></thead>
+      <tbody><tr><td colspan="6" class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<script src="/app.js"></script>
+<script>
+const UFC = { SP: '#041632', CE: '#505f76', SC: '#00a673' };
+
+async function main() {
+  let k, fil, div, terc, top;
+  try {
+    [k, fil, div, terc, top] = await Promise.all([
+      api('/api/kpis'), api('/api/filiais'), api('/api/divergencias'),
+      api('/api/terceiros'), api('/api/top')]);
+  } catch (e) { return falha(e); }
+
+  document.getElementById('dtbase').textContent = brDate(k.data_base);
+  document.getElementById('fonte').textContent =
+    `${k.arquivos} arquivos EFD · ${k.filiais} estabelecimentos · ${n(k.documentos)} documentos fiscais`;
+
+  const confOk = +k.conf_ok === +k.conf_total;
+  document.getElementById('kpis').innerHTML = [
+    card('Itens inventariados', n(k.itens), `${n(k.unidades)} unidades`),
+    card('Valor total do estoque', money(k.valor), 'somatório dos registros H010'),
+    +k.div_itens > 0
+      ? card('Divergência de valoração', money(k.div_exposicao),
+             `${k.div_itens} itens — revisão imediata`, 'alert')
+      : card('Divergência de valoração', 'R$ 0,00', 'nenhuma apontada', 'good'),
+    card('Em poder de terceiros', money(k.em_terceiros),
+         pct(k.em_terceiros, k.valor) + ' do estoque', 'alert'),
+    confOk
+      ? card('Conferência H005 × H010', `${k.conf_ok}/${k.conf_total}`, 'diferença R$ 0,00', 'good')
+      : card('Conferência H005 × H010', `${k.conf_ok}/${k.conf_total}`, 'há diferenças', 'alert'),
+    +k.negativos > 0
+      ? card('Estoque negativo', n(k.negativos), 'itens com quantidade < 0', 'alert')
+      : card('Estoque negativo', '0', 'nenhum item negativo', 'good'),
+  ].join('');
+
+  fill('tbl-filiais', fil, f => `
+    <td><span class="chip uf">${f.uf}</span></td>
+    <td class="mono">${cnpj(f.cnpj)}</td>
+    <td>${esc(f.nome)}</td>
+    <td class="num">${n(f.qtd_itens)}</td>
+    <td class="num">${n(f.qtd_total)}</td>
+    <td class="num">${money(f.valor)}</td>
+    <td class="num">${money(f.declarado)}</td>
+    <td class="num">${money(f.diferenca)}</td>
+    <td>${Math.abs(+f.diferenca) < 0.005
+          ? '<span class="chip ok">confere</span>'
+          : '<span class="chip err">divergente</span>'}</td>`);
+
+  const tot = fil.reduce((s, f) => s + +f.valor, 0);
+  document.getElementById('split').innerHTML = fil.map(f =>
+    `<span style="flex:${+f.valor};background:${UFC[f.uf] || '#75777e'}"
+       title="${f.uf} ${money(f.valor)}">${(+f.valor / tot * 100) >= 8 ? f.uf : ''}</span>`).join('');
+  document.getElementById('split-leg').innerHTML = fil.map(f =>
+    `${f.uf} ${money(f.valor)} (${(+f.valor / tot * 100).toFixed(1)}%)`).join(' &nbsp;·&nbsp; ');
+
+  fill('tbl-div', div, d => `
+    <td><span class="chip uf">${d.uf}</span></td>
+    <td class="mono">${esc(d.cod_item)}</td>
+    <td class="desc">${esc(d.descr_item || '')}</td>
+    <td class="num">${n(d.qtd)}</td>
+    <td class="num">${money(d.custo_inventario)}</td>
+    <td class="num">${money(d.custo_entrada)}</td>
+    <td class="num"><span class="chip ${+d.multiplo >= 10 ? 'err' : 'warn'}">${(+d.multiplo).toFixed(0)}×</span></td>
+    <td class="num"><b>${money(d.exposicao)}</b></td>`,
+    `<tfoot><tr><td colspan="7">Exposição total — ${div.length} itens</td>
+     <td class="num">${money(div.reduce((s, d) => s + +d.exposicao, 0))}</td></tr></tfoot>`);
+
+  fill('tbl-terc', terc, t => `
+    <td><span class="chip uf">${t.uf}</span></td>
+    <td class="mono">${cnpj(t.cnpj)}</td>
+    <td>${esc(t.depositario || '— sem cadastro 0150 —')}</td>
+    <td class="num">${n(t.itens)}</td>
+    <td class="num">${money(t.valor)}</td>`);
+
+  fill('tbl-top', top, t => `
+    <td><span class="chip uf">${t.uf}</span></td>
+    <td class="mono">${esc(t.cod_item)}</td>
+    <td class="desc">${esc(t.descr_item || '')}</td>
+    <td class="num">${n(t.qtd)}</td>
+    <td class="num">${money(t.vl_unit)}</td>
+    <td class="num">${money(t.vl_item)}</td>`);
+}
+
+function card(lbl, val, foot, cls) {
+  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+          <div class="val">${val}</div><div class="foot">${foot}</div></div>`;
+}
+main();
+</script>
+</body>
+</html>

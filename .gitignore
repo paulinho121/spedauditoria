@@ -1,0 +1,43 @@
+# ───────────────────────────── segredos ─────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─────────────────── dados fiscais de cliente ───────────────────────
+# NUNCA versionar. São dados sigilosos de terceiros e não pertencem ao
+# repositório de código — vivem no banco e no disco do auditor.
+xmls/
+*.xlsx
+*.xls
+*SPED-EFD*.txt
+SpedEFD*.txt
+*-nfe.xml
+DI_*.xml
+DUIMP*.xml
+
+# ───────────────────────────── Python ───────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# ────────────────────────── temporários ─────────────────────────────
+_q.json
+_payload.json
+*.bak
+*.tmp
+
+# ───────────────────── artefatos do Stitch ──────────────────────────
+# Mockups originais e settings locais do Claude Code (contêm token).
+stitch_auditor_fiscal_de_estoque_2022/
+*.zip
+
+# ───────────────────────────── sistema ──────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vercel

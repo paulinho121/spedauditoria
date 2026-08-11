@@ -1,0 +1,259 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Importar XML — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.drop {
+  border: 2px dashed var(--outline-variant); border-radius: var(--r-lg);
+  background: var(--surface-lowest); padding: 40px 24px; text-align: center;
+  transition: background .15s, border-color .15s; cursor: pointer;
+}
+.drop.on { border-color: var(--primary); background: var(--secondary-container); }
+.drop h3 { margin: 0 0 6px; font: 600 18px var(--head); color: var(--primary); }
+.drop p { margin: 0; color: var(--on-surface-variant); font-size: 13px; }
+.log {
+  font-family: var(--mono); font-size: 12px; line-height: 1.7;
+  max-height: 340px; overflow-y: auto; background: var(--surface-low);
+  border: 1px solid var(--outline-variant); border-radius: var(--r);
+  padding: 12px; margin-top: var(--md);
+}
+.log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log .ok { color: var(--success-dark); }
+.log .warn { color: #7a5b00; }
+.log .err { color: var(--error); }
+.log .mut { color: var(--on-surface-variant); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--md); }
+@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+progress { width: 100%; height: 6px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Importação de documentos fiscais</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Reconstrução</a>
+    <a class="on" href="/importar">Importar</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
+
+  <h2 class="sec">Enviar XML</h2>
+  <div class="two">
+    <div>
+      <div class="drop" id="drop">
+        <h3>Arraste os XML aqui</h3>
+        <p>ou clique para escolher — aceita a pasta inteira</p>
+        <input type="file" id="file" multiple accept=".xml" hidden>
+      </div>
+      <progress id="prog" value="0" max="100" hidden></progress>
+    </div>
+    <div class="card">
+      <div class="lbl">Ou importar de uma pasta do computador</div>
+      <div class="controls" style="margin: 12px 0 0">
+        <input type="search" id="pasta" value="C:\Users\Acer\Desktop\fiscal\xmls"
+               placeholder="caminho da pasta" style="min-width: 0; flex: 1 1 200px">
+        <button class="pri" id="btn-pasta">Importar pasta</button>
+      </div>
+      <div class="foot muted" style="margin-top: 10px">
+        O servidor varre a pasta recursivamente. Melhor caminho para lotes grandes —
+        o navegador trava com milhares de arquivos.
+      </div>
+    </div>
+  </div>
+
+  <div class="log" id="log" hidden></div>
+
+  <h2 class="sec">Itens sem correspondência
+    <small>código do fornecedor que ainda não foi ligado a um item seu</small></h2>
+  <div class="wrap">
+    <table id="tbl-pend">
+      <thead><tr>
+        <th>Filial</th><th>Fornecedor</th><th>Cód. dele</th><th class="desc">Descrição</th>
+        <th>NCM</th><th>Un.</th><th class="num">Ocorr.</th>
+        <th class="num">Qtd</th><th class="num">Valor</th>
+      </tr></thead>
+      <tbody><tr><td colspan="9" class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2 class="sec">CFOP não classificado
+    <small>enquanto houver linha aqui, o Kardex está incompleto</small></h2>
+  <div class="wrap">
+    <table id="tbl-cfop">
+      <thead><tr><th>CFOP</th><th class="num">Ocorrências</th><th class="num">Notas</th>
+        <th>Primeira</th><th>Última</th><th class="num">Valor</th></tr></thead>
+      <tbody><tr><td colspan="6" class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2 class="sec">Notas importadas</h2>
+  <div class="wrap">
+    <table id="tbl-notas">
+      <thead><tr>
+        <th>Emissão</th><th>NF</th><th class="desc">Natureza</th>
+        <th>Emitente</th><th>Destinatário</th>
+        <th class="num">Valor</th><th class="num">Itens</th><th class="num">Mov.</th>
+        <th>Situação</th>
+      </tr></thead>
+      <tbody><tr><td colspan="9" class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<script src="/app.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const log = $('log');
+
+function linha(txt, cls) {
+  log.hidden = false;
+  const d = document.createElement('div');
+  d.className = cls || '';
+  d.textContent = txt;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function painel() {
+  let k, pend, cfops, notas;
+  try {
+    [k, pend, cfops, notas] = await Promise.all([
+      api('/api/import/status'), api('/api/import/pendentes'),
+      api('/api/import/cfops'), api('/api/import/notas')]);
+  } catch (e) { return falha(e); }
+
+  const periodo = k.primeira ? `${brDate(k.primeira)} a ${brDate(k.ultima)}` : 'nenhuma nota ainda';
+  $('kpis').innerHTML = [
+    `<div class="card"><div class="lbl">Notas importadas</div>
+      <div class="val">${n(k.notas)}</div><div class="foot">${periodo}</div></div>`,
+    `<div class="card"><div class="lbl">Movimentos gerados</div>
+      <div class="val">${n(k.movimentos)}</div><div class="foot">${n(k.itens_nota)} itens de nota</div></div>`,
+    +k.pendentes > 0
+      ? `<div class="card alert"><div class="lbl">Itens sem correspondência</div>
+          <div class="val">${n(k.pendentes)}</div><div class="foot">precisam de de-para</div></div>`
+      : `<div class="card good"><div class="lbl">Itens sem correspondência</div>
+          <div class="val">0</div><div class="foot">todos casaram</div></div>`,
+    +k.cfops_abertos > 0
+      ? `<div class="card alert"><div class="lbl">CFOP não classificado</div>
+          <div class="val">${n(k.cfops_abertos)}</div><div class="foot">Kardex incompleto</div></div>`
+      : `<div class="card good"><div class="lbl">CFOP não classificado</div>
+          <div class="val">0</div><div class="foot">todos mapeados</div></div>`,
+    `<div class="card"><div class="lbl">Saldo de abertura</div>
+      <div class="val sm">${money(k.abertura)}</div><div class="foot">momento zero 31/12/2022</div></div>`,
+  ].join('');
+
+  fill('tbl-pend', pend, p => `
+    <td class="mono">${esc((p.cnpj || '').slice(-6))}</td>
+    <td>${esc((p.parceiro_nome || p.parceiro_doc || '').slice(0, 30))}</td>
+    <td class="mono">${esc(p.c_prod_externo)}</td>
+    <td class="desc">${esc(p.x_prod || '')}</td>
+    <td class="mono">${esc(p.ncm || '—')}</td>
+    <td>${esc(p.u_com || '')}</td>
+    <td class="num">${n(p.ocorrencias)}</td>
+    <td class="num">${n(p.qtd_total)}</td>
+    <td class="num">${money(p.vl_total)}</td>`);
+
+  fill('tbl-cfop', cfops, c => `
+    <td class="mono"><b>${esc(c.cfop)}</b></td>
+    <td class="num">${n(c.ocorrencias)}</td>
+    <td class="num">${n(c.notas)}</td>
+    <td>${brDate(c.primeira)}</td>
+    <td>${brDate(c.ultima)}</td>
+    <td class="num">${money(c.valor)}</td>`);
+
+  fill('tbl-notas', notas, t => `
+    <td>${brDate(t.dt_emi)}</td>
+    <td class="mono">${esc(t.num_nf)}/${esc(t.serie)}</td>
+    <td class="desc">${esc((t.nat_op || '').slice(0, 40))}</td>
+    <td>${esc((t.emit_nome || '').slice(0, 26))}</td>
+    <td>${esc((t.dest_nome || '').slice(0, 26))}</td>
+    <td class="num">${money(t.vl_nf)}</td>
+    <td class="num">${n(t.itens)}</td>
+    <td class="num">${n(t.movs)}</td>
+    <td>${t.situacao === 'autorizada'
+        ? '<span class="chip ok">autorizada</span>'
+        : `<span class="chip err">${esc(t.situacao)}</span>`}</td>`);
+}
+
+function mostraResultado(r) {
+  if (r.erro) return linha('ERRO: ' + r.erro, 'err');
+  const s = r.resumo;
+  linha(`— ${s.total} arquivo(s): ` +
+        Object.entries(s.por_situacao).map(([k, v]) => `${k} ${v}`).join(', '), 'mut');
+  linha(`— ${s.movimentos} movimentos gerados, ${s.pendencias} pendências`, 'mut');
+  for (const a of r.arquivos) {
+    const cls = a.situacao === 'importada' ? 'ok'
+      : (a.situacao === 'ignorado' || a.situacao === 'fora_do_grupo') ? 'mut'
+      : a.situacao === 'conflito' ? 'err' : 'warn';
+    linha(`  ${a.situacao.padEnd(22)} ${a.arquivo.slice(0, 52)}` +
+          (a.movimentos ? `  (${a.movimentos} mov)` : ''), cls);
+    for (const av of (a.avisos || [])) linha(`      ! ${av.slice(0, 110)}`, 'warn');
+  }
+  painel();
+}
+
+async function enviar(arquivos) {
+  const xmls = [...arquivos].filter(f => f.name.toLowerCase().endsWith('.xml'));
+  if (!xmls.length) return linha('Nenhum .xml na seleção.', 'err');
+  log.innerHTML = '';
+  linha(`Lendo ${xmls.length} arquivo(s)…`, 'mut');
+  $('prog').hidden = false;
+
+  const LOTE = 40;
+  for (let i = 0; i < xmls.length; i += LOTE) {
+    const parte = xmls.slice(i, i + LOTE);
+    const payload = await Promise.all(parte.map(async f => ({
+      nome: f.name, conteudo: await f.text()
+    })));
+    linha(`Enviando ${i + 1}–${i + parte.length} de ${xmls.length}…`, 'mut');
+    const r = await fetch('/api/import/upload', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ arquivos: payload })
+    }).then(x => x.json());
+    mostraResultado(r);
+    $('prog').value = Math.round((i + parte.length) / xmls.length * 100);
+  }
+  $('prog').hidden = true;
+  linha('Concluído.', 'ok');
+}
+
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+$('file').onchange = e => enviar(e.target.files);
+['dragenter', 'dragover'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('on'); }));
+['dragleave', 'drop'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('on'); }));
+drop.addEventListener('drop', e => enviar(e.dataTransfer.files));
+
+$('btn-pasta').onclick = async () => {
+  const btn = $('btn-pasta');
+  btn.disabled = true; btn.textContent = 'Importando…';
+  log.innerHTML = '';
+  linha('Varrendo a pasta no servidor… pode demorar.', 'mut');
+  try {
+    const r = await fetch('/api/import/pasta', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pasta: $('pasta').value.trim() })
+    }).then(x => x.json());
+    mostraResultado(r);
+  } catch (e) { linha('ERRO: ' + e.message, 'err'); }
+  btn.disabled = false; btn.textContent = 'Importar pasta';
+};
+
+painel();
+</script>
+</body>
+</html>
