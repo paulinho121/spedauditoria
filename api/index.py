@@ -86,8 +86,21 @@ def consulta_pg(sql, params=None):
             return cur.fetchall() if cur.description else []
 
 
-def um(lista):
-    return lista[0] if lista else {}
+def um(dados):
+    """
+    Primeira linha de um resultado.
+
+    O PostgREST varia a forma conforme o que a rota devolve: view e função que
+    retorna TABLE vêm como lista; função que retorna tipo composto — como
+    materialidade_vigente() — vem como objeto único. Tratar só a lista dava
+    KeyError: 0 no painel, e o erro não aparecia no servidor local, que consulta
+    por SQL e sempre recebe lista.
+    """
+    if isinstance(dados, dict):
+        return dados
+    if isinstance(dados, list):
+        return dados[0] if dados else {}
+    return {}
 
 
 # ------------------------------------------------------------------ sessão
