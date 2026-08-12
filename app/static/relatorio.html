@@ -1,0 +1,266 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Papel de trabalho — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+input[type=date] {
+  font: 500 14px var(--mono); padding: 9px 12px; border-radius: var(--r);
+  border: 1px solid var(--outline-variant); background: var(--surface-lowest);
+}
+.folha {
+  background: var(--surface-lowest); border: 1px solid var(--outline-variant);
+  border-radius: var(--r-lg); padding: var(--xl); margin-top: var(--md);
+}
+.folha h1 {
+  font: 700 26px/1.2 var(--head); color: var(--primary); margin: 0 0 6px;
+  letter-spacing: -.02em;
+}
+.folha .sub { color: var(--on-surface-variant); font-size: 14px; margin-bottom: var(--lg); }
+.folha h2 {
+  font: 600 17px/1.3 var(--head); color: var(--primary);
+  margin: var(--xl) 0 var(--sm); padding-bottom: 6px;
+  border-bottom: 2px solid var(--primary);
+}
+.folha h3 { font: 600 14px var(--sans); margin: var(--md) 0 6px; }
+.folha p { font-size: 13.5px; line-height: 1.6; margin: 0 0 10px; }
+.achado {
+  border: 1px solid var(--outline-variant); border-left-width: 4px;
+  border-radius: var(--r); padding: 12px 14px; margin-bottom: 10px;
+  page-break-inside: avoid;
+}
+.achado.critico { border-left-color: var(--error); }
+.achado.alto { border-left-color: #b26a00; }
+.achado.medio { border-left-color: var(--outline); }
+.achado.informativo { border-left-color: var(--secondary); }
+.achado-cab {
+  display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.achado-cab .item { font-family: var(--mono); font-weight: 600; }
+.achado-cab .val { margin-left: auto; font-family: var(--mono); font-weight: 700; }
+.achado p { font-size: 13px; margin: 0 0 6px; }
+.achado .prova {
+  font: 400 11.5px/1.5 var(--mono); color: var(--on-surface-variant);
+  border-top: 1px dashed var(--outline-variant); padding-top: 6px; margin-top: 8px;
+}
+.assin {
+  margin-top: var(--xl); padding-top: var(--md);
+  border-top: 1px solid var(--outline-variant);
+  font-size: 12px; color: var(--on-surface-variant); line-height: 1.7;
+}
+.vazio { padding: var(--md); color: var(--on-surface-variant); font-size: 13px; }
+
+@media print {
+  header.top, .controles, nav.tabs { display: none !important; }
+  body { background: #fff; }
+  main { max-width: none; padding: 0; }
+  .folha { border: none; border-radius: 0; padding: 0; margin: 0; }
+  .wrap { overflow: visible; border: 1px solid #999; }
+  th { background: #041632 !important; -webkit-print-color-adjust: exact;
+       print-color-adjust: exact; }
+  .achado, tr { page-break-inside: avoid; }
+  h2 { page-break-after: avoid; }
+  a { text-decoration: none; color: #000; }
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Papel de trabalho</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Estoque</a>
+    <a href="/importar">Importar</a>
+    <a class="on" href="/relatorio">Relatório</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <div class="card controles">
+    <div class="lbl">Montar relatório</div>
+    <div class="controls" style="margin:12px 0 0">
+      <input type="date" id="data" value="2022-12-31" min="2022-12-31">
+      <select id="sev">
+        <option value="">Todas as severidades</option>
+        <option value="critico">Somente críticos</option>
+        <option value="critico,alto">Críticos e altos</option>
+      </select>
+      <button class="pri" id="gerar">Montar</button>
+      <button id="imprimir">Imprimir / Salvar PDF</button>
+      <button id="baixar">Baixar CSV</button>
+    </div>
+    <div class="foot muted" style="margin-top:10px">
+      O relatório reúne os achados na data escolhida, cada um com o motivo e a
+      prova. Saldos negativos mudam conforme a data; a divergência de valoração
+      é do saldo de abertura e acompanha todo o período.
+    </div>
+  </div>
+
+  <div class="folha" id="folha"><div class="skel">carregando…</div></div>
+</main>
+
+<script src="/app.js"></script>
+<script>ligarSair();</script>
+<script>
+const $ = id => document.getElementById(id);
+let ultimo = [];
+
+const ROTULO = {
+  valoracao: 'Divergência de valoração',
+  saldo_negativo: 'Saldo negativo',
+  terceiros: 'Mercadoria em poder de terceiros',
+  cfop_aberto: 'CFOP sem classificação',
+  item_pendente: 'Item sem correspondência no cadastro',
+  ressalva: 'Ressalva assumida',
+};
+const SEV = { critico: 'Crítico', alto: 'Alto', medio: 'Médio', informativo: 'Informativo' };
+const CHIP = { critico: 'err', alto: 'warn', medio: '', informativo: 'ok' };
+
+async function montar() {
+  const data = $('data').value;
+  if (!data) return;
+  const folha = $('folha');
+  folha.innerHTML = '<div class="skel">montando o relatório…</div>';
+
+  let achados, resumo, fontes;
+  try {
+    [achados, resumo, fontes] = await Promise.all([
+      api('/api/relatorio?data=' + data),
+      api('/api/relatorio/resumo?data=' + data),
+      api('/api/relatorio/fontes'),
+    ]);
+  } catch (e) { folha.innerHTML = ''; return falha(e); }
+
+  const filtro = $('sev').value ? $('sev').value.split(',') : null;
+  const vis = filtro ? achados.filter(a => filtro.includes(a.severidade)) : achados;
+  ultimo = vis;
+
+  const porTipo = {};
+  vis.forEach(a => (porTipo[a.tipo] = porTipo[a.tipo] || []).push(a));
+
+  const exposicao = vis.filter(a => a.tipo === 'valoracao')
+                       .reduce((s, a) => s + +a.valor, 0);
+
+  folha.innerHTML = `
+    <h1>Auditoria de estoque — papel de trabalho</h1>
+    <div class="sub">
+      MULTI COMERCIAL &amp; IMPORTADORA · posição em <b>${brDate(data)}</b><br>
+      Gerado em ${new Date().toLocaleString('pt-BR')}
+    </div>
+
+    <h2>1. Sumário</h2>
+    <section class="grid kpis">
+      ${['Itens com saldo|' + n(resumo.itens_saldo),
+         'Valor do estoque|' + money(resumo.valor_estoque),
+         'Achados|' + n(vis.length),
+         'Críticos|' + n(vis.filter(a => a.severidade === 'critico').length),
+         'Exposição apurada|' + money(exposicao)].map(x => {
+        const [l, v] = x.split('|');
+        return `<div class="card"><div class="lbl">${l}</div>
+                <div class="val sm">${v}</div></div>`; }).join('')}
+    </section>
+    <p style="margin-top:14px">
+      Foram examinados ${n(resumo.arquivos)} arquivos EFD, ${n(resumo.notas)} notas
+      fiscais e ${n(resumo.movimentos)} lançamentos de movimento, cobrindo
+      ${n(resumo.filiais)} estabelecimentos. O saldo de cada item é apurado
+      percorrendo os movimentos em ordem cronológica até a data da posição, com
+      custo médio ponderado móvel; as saídas baixam pelo custo vigente, nunca
+      pelo valor da nota de venda.
+    </p>
+
+    <h2>2. Achados</h2>
+    ${Object.keys(ROTULO).filter(t => porTipo[t]).map((t, i) => `
+      <h3>2.${i + 1} ${ROTULO[t]} <span class="muted">(${porTipo[t].length})</span></h3>
+      ${porTipo[t].map(a => `
+        <div class="achado ${a.severidade}">
+          <div class="achado-cab">
+            <span class="chip ${CHIP[a.severidade]}">${SEV[a.severidade]}</span>
+            ${a.uf ? chipUF(a.uf) : ''}
+            ${a.cod_item ? `<span class="item">${esc(a.cod_item)}</span>` : ''}
+            <span style="flex:1 1 240px">${esc((a.descr_item || '').slice(0, 76))}</span>
+            ${a.valor != null
+              ? `<span class="val">${money(a.valor)}</span>` : ''}
+          </div>
+          <p>${esc(a.motivo)}</p>
+          ${a.prova ? `<div class="prova">${esc(a.prova)}</div>` : ''}
+        </div>`).join('')}
+    `).join('') || '<div class="vazio">Nenhum achado nesta data com o filtro atual.</div>'}
+
+    <h2>3. Arquivos que sustentam este relatório</h2>
+    <div class="wrap"><table><thead><tr>
+      <th>UF</th><th>CNPJ</th><th>Período</th><th>Perfil</th>
+      <th class="desc">Arquivo</th><th>SHA-256</th><th class="num">Linhas</th>
+      <th>Importado por</th>
+      </tr></thead><tbody>${fontes.map(f => `<tr>
+        <td>${chipUF(f.uf)}</td>
+        <td class="mono">${cnpj(f.cnpj)}</td>
+        <td class="mono">${brDate(f.dt_ini)} a ${brDate(f.dt_fin)}</td>
+        <td class="mono">${esc(f.ind_perfil || '')}</td>
+        <td class="desc" style="font-size:11px">${esc((f.nome_arquivo || '').slice(0, 58))}</td>
+        <td class="mono" style="font-size:10.5px">${esc(f.sha256 || '')}…</td>
+        <td class="num">${n(f.linhas_lidas)}</td>
+        <td>${esc(f.importado_por || '')}</td>
+      </tr>`).join('')}</tbody></table></div>
+
+    <h2>4. Metodologia e limitações</h2>
+    <p><b>Origem dos dados.</b> Bloco H (H005/H010) dos arquivos EFD ICMS/IPI,
+    onde o inventário de 31/12 é legalmente declarado, e registros C100/C170 do
+    mesmo arquivo, além dos XML de NF-e importados.</p>
+    <p><b>Valoração.</b> Custo médio ponderado móvel. Entradas incorporam custo e
+    recalculam a média; saídas baixam pelo custo vigente. Remessa em locação e
+    para armazém geral movem a mercadoria de posse sem baixar o patrimônio.</p>
+    <p><b>Classificação de CFOP.</b> Cada CFOP é traduzido em efeito no estoque
+    por tabela versionada. CFOP não classificado <b>bloqueia</b> a geração do
+    movimento em vez de ser adivinhado — por isso ele aparece como achado.</p>
+    <p><b>Limitação.</b> Este trabalho audita o estoque a partir do que foi
+    declarado e dos documentos importados. Períodos sem arquivo carregado não são
+    cobertos, e itens cuja correspondência de cadastro está pendente não geram
+    movimento — ambos constam como achados nas seções acima.</p>
+
+    <div class="assin">
+      Relatório gerado automaticamente pelo Fiscal Stock a partir dos arquivos
+      listados na seção 3. Cada achado aponta o registro e a linha de origem, e o
+      SHA-256 permite confirmar que o arquivo analisado é o mesmo entregue ao
+      Fisco.<br><br>
+      Responsável pela auditoria: ______________________________________<br><br>
+      Data: ____ / ____ / ________
+    </div>`;
+}
+
+function baixarCsv() {
+  if (!ultimo.length) return;
+  const cab = ['tipo', 'severidade', 'uf', 'cnpj', 'cod_item', 'descr_item',
+               'quantidade', 'valor', 'motivo', 'prova'];
+  const esc2 = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  // BOM para o Excel abrir em UTF-8; ponto e virgula porque a virgula e
+  // separador decimal no padrao brasileiro.
+  const csv = '﻿' + [cab.join(';')]
+    .concat(ultimo.map(a => cab.map(c => esc2(a[c])).join(';'))).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `achados-${$('data').value}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+$('gerar').onclick = montar;
+$('data').onchange = montar;
+$('sev').onchange = montar;
+$('imprimir').onclick = () => window.print();
+$('baixar').onclick = baixarCsv;
+$('data').max = new Date().toISOString().slice(0, 10);
+montar();
+</script>
+</body>
+</html>

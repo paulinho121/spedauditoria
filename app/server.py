@@ -272,6 +272,13 @@ ROUTES = {
         + (qs.get("item") or [""])[0].replace("'", "") + "')"),
     "/api/terceiros": lambda qs: query(SQL_TERCEIROS),
     "/api/top": lambda qs: query(SQL_TOP),
+    "/api/relatorio": lambda qs: query(
+        "select * from relatorio_achados(date '"
+        + (qs.get("data") or ["2022-12-31"])[0].replace("'", "") + "')"),
+    "/api/relatorio/resumo": lambda qs: query(
+        "select * from relatorio_resumo(date '"
+        + (qs.get("data") or ["2022-12-31"])[0].replace("'", "") + "')")[0],
+    "/api/relatorio/fontes": lambda qs: query("select * from v_relatorio_fontes"),
     "/api/kardex": lambda qs: query(sql_kardex(
         (qs.get("cnpj") or [""])[0],
         (qs.get("item") or [""])[0],
@@ -474,6 +481,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/reconstrucao.html"
         if path == "/importar":
             path = "/importar.html"
+        if path == "/relatorio":
+            path = "/relatorio.html"
         if path == "/login":
             path = "/login.html"
 

@@ -185,6 +185,11 @@ ROTAS = {
             "p_cod_item": (qs.get("item") or [""])[0]}),
     "/api/top": lambda qs: consulta_rest(
         "v_inventario", {"order": "vl_item.desc", "limit": 12}),
+    "/api/relatorio": lambda qs: consulta_rest("rpc/relatorio_achados", {
+        "p_data": (qs.get("data") or ["2022-12-31"])[0]}),
+    "/api/relatorio/resumo": lambda qs: um(consulta_rest("rpc/relatorio_resumo", {
+        "p_data": (qs.get("data") or ["2022-12-31"])[0]})),
+    "/api/relatorio/fontes": lambda qs: consulta_rest("v_relatorio_fontes"),
     "/api/kardex": lambda qs: consulta_rest("rpc/kardex_item", {
         "p_cnpj": (qs.get("cnpj") or [""])[0],
         "p_cod_item": (qs.get("item") or [""])[0],
@@ -271,6 +276,8 @@ def app(environ, start_response):
         caminho = "/reconstrucao.html"
     elif caminho == "/importar":
         caminho = "/importar.html"
+    elif caminho == "/relatorio":
+        caminho = "/relatorio.html"
     elif caminho == "/login":
         caminho = "/login.html"
 
