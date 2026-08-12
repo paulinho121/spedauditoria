@@ -530,10 +530,21 @@ class Handler(BaseHTTPRequestHandler):
             path = "/importar.html"
         if path == "/relatorio":
             path = "/relatorio.html"
+        if path == "/manual":
+            path = "/manual.html"
         if path == "/achados":
             path = "/achados.html"
         if path == "/login":
             path = "/login.html"
+
+        # O manual mora na raiz do projeto, nao em static: e o mesmo arquivo
+        # que o repositorio publica, para as duas versoes nunca divergirem.
+        if path in ("/MANUAL.md", "/README.md"):
+            doc = os.path.join(os.path.dirname(HERE), path.lstrip("/"))
+            if os.path.isfile(doc):
+                with open(doc, "rb") as fh:
+                    return self._send(200, fh.read(), "text/markdown; charset=utf-8")
+            return self._send(404, "manual nao encontrado", "text/plain; charset=utf-8")
 
         alvo = os.path.normpath(os.path.join(STATIC, path.lstrip("/")))
         if not alvo.startswith(STATIC) or not os.path.isfile(alvo):

@@ -1,0 +1,288 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.doc { display: grid; grid-template-columns: 250px 1fr; gap: var(--xl);
+       align-items: start; }
+.indice {
+  position: sticky; top: 76px; max-height: calc(100vh - 100px); overflow-y: auto;
+  background: var(--surface-lowest); border: 1px solid var(--outline-variant);
+  border-radius: var(--r-lg); padding: var(--md);
+}
+.indice .lbl { font-size: 11px; font-weight: 700; letter-spacing: .05em;
+               text-transform: uppercase; color: var(--on-surface-variant);
+               margin-bottom: 10px; }
+.indice a { display: block; padding: 5px 8px; border-radius: var(--r);
+            font-size: 13px; color: var(--on-surface-variant); line-height: 1.35; }
+.indice a:hover { background: var(--surface-low); color: var(--on-surface); }
+.indice a.on { background: var(--secondary-container); color: var(--primary);
+               font-weight: 600; }
+.indice a.n3 { padding-left: 20px; font-size: 12.5px; }
+
+.texto {
+  background: var(--surface-lowest); border: 1px solid var(--outline-variant);
+  border-radius: var(--r-lg); padding: var(--xl); max-width: 82ch;
+}
+.texto h1 { font: 700 28px/1.2 var(--head); color: var(--primary);
+            margin: 0 0 var(--lg); letter-spacing: -.02em; }
+.texto h2 { font: 600 20px/1.3 var(--head); color: var(--primary);
+            margin: var(--xl) 0 var(--sm); padding-bottom: 6px;
+            border-bottom: 2px solid var(--primary); scroll-margin-top: 80px; }
+.texto h3 { font: 600 16px/1.35 var(--head); margin: var(--lg) 0 var(--sm);
+            scroll-margin-top: 80px; }
+.texto p { font-size: 14.5px; line-height: 1.7; margin: 0 0 12px; }
+.texto ul, .texto ol { margin: 0 0 14px; padding-left: 22px; }
+.texto li { font-size: 14.5px; line-height: 1.65; margin-bottom: 6px; }
+.texto li::marker { color: var(--secondary); }
+.texto code { font: 500 13px var(--mono); background: var(--surface-container);
+              padding: 1px 5px; border-radius: 3px; }
+.texto pre { background: var(--primary); color: #e8eef7; border-radius: var(--r);
+             padding: 14px 16px; overflow-x: auto; margin: 0 0 14px; }
+.texto pre code { background: none; color: inherit; font-size: 12.5px;
+                  line-height: 1.6; padding: 0; }
+.texto blockquote {
+  margin: 0 0 14px; padding: 12px 16px; background: var(--surface-low);
+  border-left: 4px solid var(--secondary); border-radius: var(--r);
+}
+.texto blockquote p { margin: 0; font-size: 14px; }
+.texto hr { border: none; border-top: 1px solid var(--outline-variant);
+            margin: var(--xl) 0; }
+.texto table { margin-bottom: 14px; }
+.texto a { color: var(--secondary); text-decoration: underline;
+           text-underline-offset: 2px; }
+
+mark { background: #ffe9a8; color: inherit; padding: 0 2px; border-radius: 2px; }
+
+@media print {
+  header.top, .indice, .controles { display: none !important; }
+  .doc { display: block; }
+  .texto { border: none; padding: 0; max-width: none; }
+  .texto pre { background: #f0f0f0; color: #000; border: 1px solid #ccc; }
+  .texto h2 { page-break-after: avoid; }
+  table, blockquote, pre { page-break-inside: avoid; }
+}
+@media (max-width: 900px) {
+  .doc { grid-template-columns: 1fr; }
+  .indice { position: static; max-height: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Manual do usuário</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Estoque</a>
+    <a href="/importar">Importar</a>
+    <a href="/achados">Achados</a>
+    <a href="/relatorio">Relatório</a>
+    <a class="on" href="/manual">Manual</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <div class="controls controles">
+    <input type="search" id="busca" placeholder="Buscar no manual…" autocomplete="off">
+    <button id="imprimir">Imprimir / Salvar PDF</button>
+    <span class="muted" id="achou" style="font-size:13px"></span>
+  </div>
+
+  <div class="doc">
+    <nav class="indice" id="indice" aria-label="Sumário do manual">
+      <div class="lbl">Sumário</div>
+    </nav>
+    <article class="texto" id="texto"><div class="skel">carregando o manual…</div></article>
+  </div>
+</main>
+
+<script src="/app.js"></script>
+<script>ligarSair();</script>
+<script>
+const $ = id => document.getElementById(id);
+
+/**
+ * Renderiza o subconjunto de Markdown usado no manual: títulos, listas,
+ * tabelas, código, citação, régua, negrito, itálico e link.
+ *
+ * Um renderizador próprio em vez de biblioteca: o app não tem dependência
+ * nenhuma e a CSP do painel bloqueia script externo. São ~60 linhas para o que
+ * o documento realmente usa.
+ */
+function markdown(md) {
+  const linhas = md.replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let i = 0, emLista = null, emTabela = false;
+
+  const inline = t => esc(t)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+  const fechaLista = () => { if (emLista) { out.push(`</${emLista}>`); emLista = null; } };
+  const fechaTabela = () => { if (emTabela) { out.push('</tbody></table></div>'); emTabela = false; } };
+
+  while (i < linhas.length) {
+    const l = linhas[i];
+
+    if (l.startsWith('```')) {                       // bloco de código
+      fechaLista(); fechaTabela();
+      const buf = [];
+      i++;
+      while (i < linhas.length && !linhas[i].startsWith('```')) buf.push(linhas[i++]);
+      i++;
+      out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    if (/^\|/.test(l)) {                             // tabela
+      fechaLista();
+      const celulas = l.split('|').slice(1, -1).map(c => c.trim());
+      if (/^\|[\s:|-]+\|$/.test(l)) { i++; continue; }   // linha separadora
+      if (!emTabela) {
+        out.push('<div class="wrap"><table><thead><tr>' +
+                 celulas.map(c => `<th>${inline(c)}</th>`).join('') +
+                 '</tr></thead><tbody>');
+        emTabela = true;
+      } else {
+        out.push('<tr>' + celulas.map(c =>
+          `<td${/^[\d.,R$ ]+$/.test(c) ? ' class="num"' : ''}>${inline(c)}</td>`)
+          .join('') + '</tr>');
+      }
+      i++; continue;
+    }
+    fechaTabela();
+
+    const cab = l.match(/^(#{1,4})\s+(.*)$/);
+    if (cab) {
+      fechaLista();
+      const n = cab[1].length;
+      const id = 's' + out.length;
+      out.push(`<h${n} id="${id}">${inline(cab[2])}</h${n}>`);
+      i++; continue;
+    }
+
+    if (/^[-*]\s+/.test(l)) {
+      if (emLista !== 'ul') { fechaLista(); out.push('<ul>'); emLista = 'ul'; }
+      out.push(`<li>${inline(l.replace(/^[-*]\s+/, ''))}</li>`); i++; continue;
+    }
+    if (/^\d+\.\s+/.test(l)) {
+      if (emLista !== 'ol') { fechaLista(); out.push('<ol>'); emLista = 'ol'; }
+      out.push(`<li>${inline(l.replace(/^\d+\.\s+/, ''))}</li>`); i++; continue;
+    }
+    fechaLista();
+
+    if (/^>\s?/.test(l)) {
+      const buf = [];
+      while (i < linhas.length && /^>\s?/.test(linhas[i])) buf.push(linhas[i++].replace(/^>\s?/, ''));
+      out.push(`<blockquote><p>${inline(buf.join(' '))}</p></blockquote>`);
+      continue;
+    }
+    if (/^---+$/.test(l)) { out.push('<hr>'); i++; continue; }
+    if (!l.trim()) { i++; continue; }
+
+    const buf = [];                                   // parágrafo
+    while (i < linhas.length && linhas[i].trim() &&
+           !/^[#>|`-]|^\d+\.\s/.test(linhas[i])) buf.push(linhas[i++]);
+    if (buf.length) out.push(`<p>${inline(buf.join(' '))}</p>`);
+    else i++;
+  }
+  fechaLista(); fechaTabela();
+  return out.join('\n');
+}
+
+function montaIndice() {
+  const idx = $('indice');
+  idx.innerHTML = '<div class="lbl">Sumário</div>';
+  $('texto').querySelectorAll('h2, h3').forEach(h => {
+    const a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.textContent = h.textContent;
+    if (h.tagName === 'H3') a.className = 'n3';
+    a.onclick = e => {
+      e.preventDefault();
+      h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      history.replaceState(null, '', '#' + h.id);
+    };
+    idx.appendChild(a);
+  });
+
+  // Marca no sumário a seção visível.
+  const alvos = [...$('texto').querySelectorAll('h2, h3')];
+  const obs = new IntersectionObserver(es => {
+    es.forEach(e => {
+      if (!e.isIntersecting) return;
+      idx.querySelectorAll('a').forEach(a => a.classList.remove('on'));
+      const a = idx.querySelector(`a[href="#${e.target.id}"]`);
+      if (a) a.classList.add('on');
+    });
+  }, { rootMargin: '-80px 0px -70% 0px' });
+  alvos.forEach(h => obs.observe(h));
+}
+
+let original = '';
+
+function buscar() {
+  const t = $('busca').value.trim();
+  const alvo = $('texto');
+  if (!t) { alvo.innerHTML = original; montaIndice(); $('achou').textContent = ''; return; }
+
+  // Destaca só dentro de nós de texto, para não quebrar as tags do HTML.
+  alvo.innerHTML = original;
+  const re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+  let n = 0;
+  const anda = no => {
+    for (const f of [...no.childNodes]) {
+      if (f.nodeType === 3) {
+        if (!re.test(f.nodeValue)) continue;
+        re.lastIndex = 0;
+        const span = document.createElement('span');
+        span.innerHTML = esc(f.nodeValue).replace(re, m => { n++; return `<mark>${m}</mark>`; });
+        f.replaceWith(span);
+      } else if (f.nodeType === 1 && !['SCRIPT', 'STYLE'].includes(f.tagName)) {
+        anda(f);
+      }
+    }
+  };
+  anda(alvo);
+  $('achou').textContent = n ? `${n} ocorrência${n > 1 ? 's' : ''}` : 'nada encontrado';
+  const primeiro = alvo.querySelector('mark');
+  if (primeiro) primeiro.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  montaIndice();
+}
+
+(async () => {
+  try {
+    const r = await fetch('/MANUAL.md');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    original = markdown(await r.text());
+    $('texto').innerHTML = original;
+    montaIndice();
+    if (location.hash) {
+      const h = document.querySelector(location.hash);
+      if (h) h.scrollIntoView();
+    }
+  } catch (e) {
+    $('texto').innerHTML =
+      `<div class="err-box"><b>Não consegui carregar o manual.</b><br>${esc(e.message)}
+       <br><br>O arquivo MANUAL.md deve estar na raiz do projeto.</div>`;
+  }
+})();
+
+let t;
+$('busca').addEventListener('input', () => { clearTimeout(t); t = setTimeout(buscar, 250); });
+$('imprimir').onclick = () => window.print();
+</script>
+</body>
+</html>

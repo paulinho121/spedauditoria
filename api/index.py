@@ -308,6 +308,8 @@ def app(environ, start_response):
         caminho = "/importar.html"
     elif caminho == "/relatorio":
         caminho = "/relatorio.html"
+    elif caminho == "/manual":
+        caminho = "/manual.html"
     elif caminho == "/achados":
         caminho = "/achados.html"
     elif caminho == "/login":
@@ -340,6 +342,14 @@ def app(environ, start_response):
         return responde("501 Not Implemented", json.dumps({
             "erro": "A importação roda apenas localmente. Use: "
                     "python -m auditoria importar <arquivos>"}))
+
+    # O manual vem da raiz do repositorio, nao de app/static.
+    if caminho in ("/MANUAL.md", "/README.md"):
+        doc = os.path.join(RAIZ, caminho.lstrip("/"))
+        if os.path.isfile(doc):
+            with open(doc, "rb") as fh:
+                return responde("200 OK", fh.read(), "text/markdown; charset=utf-8")
+        return responde("404 Not Found", json.dumps({"erro": "manual nao encontrado"}))
 
     dados, ctype = estatico(caminho)
     if dados is None:
