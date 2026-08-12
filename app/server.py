@@ -259,6 +259,13 @@ LIVRES = {"/login", "/login.html", "/app.css", "/app.js", "/favicon.ico",
 ROUTES = {
     "/api/import/status": lambda qs: dict(query(SQL_IMPORT_STATUS)[0], importacao=True),
     "/api/import/pendentes": lambda qs: query(SQL_PENDENTES),
+    "/api/import/cfop/detalhe": lambda qs: query(
+        "select * from cfop_aberto_detalhe('"
+        + (qs.get("cfop") or [""])[0].replace("'", "") + "')"),
+    "/api/import/sugestoes": lambda qs: query(
+        "select * from item_pendente_sugestoes('"
+        + (qs.get("cnpj") or [""])[0].replace("'", "") + "','"
+        + (qs.get("prod") or [""])[0].replace("'", "") + "')"),
     "/api/import/cfops": lambda qs: query("select * from v_cfop_nao_classificado limit 100"),
     "/api/import/notas": lambda qs: query(SQL_NOTAS),
     "/api/kpis": lambda qs: query(SQL_KPIS)[0],

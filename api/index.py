@@ -205,6 +205,12 @@ ROTAS = {
                                           importacao=bool(DATABASE_URL)),
     "/api/import/pendentes": lambda qs: consulta_rest(
         "item_pendente", {"status": "eq.aberto", "order": "vl_total.desc", "limit": 200}),
+    "/api/import/cfop/detalhe": lambda qs: consulta_rest(
+        "rpc/cfop_aberto_detalhe", {"p_cfop": (qs.get("cfop") or [""])[0]}),
+    "/api/import/sugestoes": lambda qs: consulta_rest(
+        "rpc/item_pendente_sugestoes", {
+            "p_cnpj": (qs.get("cnpj") or [""])[0],
+            "p_c_prod": (qs.get("prod") or [""])[0]}),
     "/api/import/cfops": lambda qs: consulta_rest("v_cfop_nao_classificado"),
     "/api/import/notas": lambda qs: consulta_rest(
         "v_notas", {"order": "dt_emi.desc", "limit": 200}),

@@ -148,6 +148,160 @@ function linha(txt, cls) {
   log.scrollTop = log.scrollHeight;
 }
 
+
+/** Liga um card ao seu painel, por clique ou teclado. */
+function ligar(id, fn) {
+  const c = document.getElementById(id);
+  if (!c) return;
+  c.onclick = fn;
+  c.onkeydown = e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); }
+  };
+}
+
+// --------------------------------------------- itens sem correspondencia
+async function painelPendentes(pend) {
+  const { corpo } = abrirPainel('Itens sem correspondência no cadastro',
+    'Código usado pelo emitente da nota que ainda não foi ligado a um item seu. '
+    + 'Enquanto não for, a entrada não chega ao Kardex.');
+  const total = pend.reduce((a, p) => a + (+p.vl_total || 0), 0);
+  corpo.innerHTML = `
+    <section class="grid kpis" style="margin-bottom:16px">
+      <div class="card alert"><div class="lbl">Itens pendentes</div>
+        <div class="val sm">${n(pend.length)}</div></div>
+      <div class="card"><div class="lbl">Valor que não entrou no estoque</div>
+        <div class="val sm">${money(total)}</div></div>
+    </section>
+    <div class="motivo">
+      Numa nota que <b>vocês emitem</b>, o código do produto é o de vocês e o
+      sistema aceita direto. Numa nota <b>recebida</b>, o código é de quem emitiu
+      — inclusive quando vem de outra filial sua, porque os códigos colidem entre
+      estabelecimentos. Por isso cada um precisa ser confirmado uma vez.
+      Depois disso, vale para sempre.
+    </div>
+    ${pend.map((p, i) => `
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <b class="mono">${esc(p.c_prod_externo)}</b>
+          <span style="flex:1 1 300px">${esc((p.x_prod || '').slice(0, 84))}</span>
+          <span class="muted mono" style="font-size:12px">${n(p.ocorrencias)}× ·
+            ${n(p.qtd_total)} un</span>
+          <b class="mono">${money(p.vl_total)}</b>
+        </div>
+        <div class="prova">
+          filial ${esc((p.cnpj || '').slice(-6))} ·
+          emitente ${esc((p.parceiro_nome || p.parceiro_doc || '—').slice(0, 40))} ·
+          NCM ${esc(p.ncm || '—')} · unidade ${esc(p.u_com || '—')}<br>
+          primeira nota: ${esc(p.primeira_chave || '—')}
+        </div>
+        <button class="sug-btn" data-cnpj="${esc(p.cnpj)}"
+                data-prod="${esc(p.c_prod_externo)}" data-i="${i}"
+                style="margin-top:10px">Buscar candidatos no cadastro</button>
+        <div id="sug-${i}"></div>
+      </div>`).join('')}`;
+
+  corpo.querySelectorAll('.sug-btn').forEach(b => b.onclick = async () => {
+    const alvo = document.getElementById('sug-' + b.dataset.i);
+    if (alvo.innerHTML) { alvo.innerHTML = ''; b.textContent = 'Buscar candidatos no cadastro'; return; }
+    b.textContent = 'buscando…';
+    let sug;
+    try {
+      sug = await api('/api/import/sugestoes?cnpj=' + encodeURIComponent(b.dataset.cnpj)
+                      + '&prod=' + encodeURIComponent(b.dataset.prod));
+    } catch (e) {
+      b.textContent = 'Buscar candidatos no cadastro';
+      alvo.innerHTML = `<div class="err-box">${esc(e.message)}</div>`;
+      return;
+    }
+    b.textContent = 'Ocultar candidatos';
+    if (!sug.length) {
+      alvo.innerHTML = '<p class="muted" style="margin-top:10px;font-size:13px">'
+        + 'Nenhum item do cadastro se parece com esta descrição. Provavelmente é '
+        + 'produto novo, que ainda não existe no cadastro do estabelecimento.</p>';
+      return;
+    }
+    alvo.innerHTML = `<div class="wrap" style="margin-top:10px"><table><thead><tr>
+      <th>Código</th><th class="desc">Descrição no cadastro</th><th>NCM</th>
+      <th>Un.</th><th>Confiança</th><th class="num">Semelhança</th><th>Base do casamento</th><th>No estoque</th>
+      </tr></thead><tbody>${sug.map(x => {
+        const cf = { alta: 'ok', media: 'warn', baixa: '' }[x.confianca] || '';
+        return `<tr>
+        <td class="mono"><b>${esc(x.cod_item)}</b></td>
+        <td class="desc">${esc(x.descr_item || '')}</td>
+        <td class="mono">${esc(x.ncm || '—')}</td>
+        <td>${esc(x.unid_inv || '')}</td>
+        <td><span class="chip ${cf}">${esc(x.confianca)}</span></td>
+        <td class="num">${(+x.semelhanca * 100).toFixed(0)}%</td>
+        <td style="font-size:12px">${esc(x.origem)}</td>
+        <td>${x.ja_no_estoque ? '<span class="chip ok">sim</span>'
+                              : '<span class="muted">não</span>'}</td>
+      </tr>`; }).join('')}</tbody></table></div>
+      <p class="muted" style="font-size:12px;margin-top:8px">
+        <b>Alta</b> = mesmo código mais descrição ou NCM coincidentes; é o
+        caso das transferências entre filiais, onde o código é o do grupo.
+        <b>Média</b> e <b>baixa</b> exigem conferir a descrição antes de
+        aceitar — o código sozinho engana: 4061 é refletor em SP e pinça em SC.</p>`;
+  });
+}
+
+// ---------------------------------------------------- CFOP nao classificado
+async function painelCfops(cfops) {
+  const { corpo } = abrirPainel('CFOP sem classificação',
+    'Enquanto o CFOP não tiver um efeito definido, os itens dessas notas não '
+    + 'geram movimento e o saldo apurado fica incompleto.');
+  corpo.innerHTML = `
+    <div class="motivo">
+      O sistema traduz cada CFOP em efeito no estoque — soma, baixa, muda de
+      posse, simbólico ou fora do escopo. CFOP desconhecido <b>bloqueia</b> o
+      lançamento em vez de ser adivinhado: um Kardex com furo visível é
+      auditável; um com número inventado, não.
+    </div>
+    ${cfops.map((c, i) => `
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <b class="mono" style="font-size:16px">CFOP ${esc(c.cfop)}</b>
+          <span style="flex:1">${n(c.ocorrencias)} item(ns) em ${n(c.notas)} nota(s)</span>
+          <b class="mono">${money(c.valor)}</b>
+        </div>
+        <div class="prova">de ${brDate(c.primeira)} a ${brDate(c.ultima)}</div>
+        <div id="cf-${i}"></div>
+        <button class="cf-btn" data-cfop="${esc(c.cfop)}" data-i="${i}"
+                style="margin-top:10px">Ver as notas</button>
+      </div>`).join('')}`;
+
+  corpo.querySelectorAll('.cf-btn').forEach(b => b.onclick = async () => {
+    const alvo = document.getElementById('cf-' + b.dataset.i);
+    if (alvo.innerHTML) { alvo.innerHTML = ''; b.textContent = 'Ver as notas'; return; }
+    b.textContent = 'carregando…';
+    let ds;
+    try {
+      ds = await api('/api/import/cfop/detalhe?cfop=' + encodeURIComponent(b.dataset.cfop));
+    } catch (e) {
+      b.textContent = 'Ver as notas';
+      alvo.innerHTML = `<div class="err-box">${esc(e.message)}</div>`;
+      return;
+    }
+    b.textContent = 'Ocultar as notas';
+    alvo.innerHTML = `<div class="wrap" style="margin-top:10px"><table><thead><tr>
+      <th>NF</th><th>Emissão</th><th class="desc">Natureza declarada</th>
+      <th>Sentido</th><th class="desc">Contraparte</th>
+      <th>Código</th><th class="desc">Produto</th>
+      <th class="num">Qtd</th><th class="num">Valor</th>
+      </tr></thead><tbody>${ds.map(d => `<tr>
+        <td class="mono">${esc(d.num_nf || '')}/${esc(d.serie || '')}</td>
+        <td class="mono">${brDate(d.dt_emi)}</td>
+        <td class="desc">${esc((d.nat_op || '').slice(0, 40))}</td>
+        <td>${d.sentido === 'saida' ? '<span class="chip warn">saída</span>'
+                                    : '<span class="chip ok">entrada</span>'}</td>
+        <td class="desc">${esc((d.contraparte || '—').slice(0, 30))}</td>
+        <td class="mono">${esc(d.cod_item || '')}</td>
+        <td class="desc">${esc((d.x_prod || '').slice(0, 40))}</td>
+        <td class="num">${n(d.qtd)}</td>
+        <td class="num">${money(d.vl_prod)}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  });
+}
+
 async function painel() {
   let k, pend, cfops, notas;
   try {
@@ -168,18 +322,21 @@ async function painel() {
     `<div class="card"><div class="lbl">Movimentos gerados</div>
       <div class="val">${n(k.movimentos)}</div><div class="foot">${n(k.itens_nota)} itens de nota</div></div>`,
     +k.pendentes > 0
-      ? `<div class="card alert"><div class="lbl">Itens sem correspondência</div>
-          <div class="val">${n(k.pendentes)}</div><div class="foot">precisam de de-para</div></div>`
+      ? `<div class="card alert clicavel" id="ver-pend" role="button" tabindex="0"><div class="lbl">Itens sem correspondência</div>
+          <div class="val">${n(k.pendentes)}</div><div class="foot">clique para verificar</div></div>`
       : `<div class="card good"><div class="lbl">Itens sem correspondência</div>
           <div class="val">0</div><div class="foot">todos casaram</div></div>`,
     +k.cfops_abertos > 0
-      ? `<div class="card alert"><div class="lbl">CFOP não classificado</div>
-          <div class="val">${n(k.cfops_abertos)}</div><div class="foot">Kardex incompleto</div></div>`
+      ? `<div class="card alert clicavel" id="ver-cfop" role="button" tabindex="0"><div class="lbl">CFOP não classificado</div>
+          <div class="val">${n(k.cfops_abertos)}</div><div class="foot">clique para verificar</div></div>`
       : `<div class="card good"><div class="lbl">CFOP não classificado</div>
           <div class="val">0</div><div class="foot">todos mapeados</div></div>`,
     `<div class="card"><div class="lbl">Saldo de abertura</div>
       <div class="val sm">${money(k.abertura)}</div><div class="foot">momento zero 31/12/2022</div></div>`,
   ].join('');
+
+  ligar('ver-pend', () => painelPendentes(pend));
+  ligar('ver-cfop', () => painelCfops(cfops));
 
   fill('tbl-pend', pend, p => `
     <td class="mono">${esc((p.cnpj || '').slice(-6))}</td>
