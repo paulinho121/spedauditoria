@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Achados — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+input[type=date] {
+  font: 500 14px var(--mono); padding: 9px 12px; border-radius: var(--r);
+  border: 1px solid var(--outline-variant); background: var(--surface-lowest);
+  color: var(--on-surface);
+}
+.ach {
+  background: var(--surface-lowest); border: 1px solid var(--outline-variant);
+  border-left: 4px solid var(--outline); border-radius: var(--r);
+  padding: 14px 16px; margin-bottom: 10px;
+}
+.ach.critico { border-left-color: var(--error); }
+.ach.alto { border-left-color: var(--warn-fg); }
+.ach.informativo { border-left-color: var(--secondary); }
+.ach.st-resolvido, .ach.st-aceito { opacity: .62; }
+.ach-cab { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.ach-cab .id { font: 600 12px var(--mono); color: var(--on-surface-variant); }
+.ach-cab .val { margin-left: auto; font: 700 15px var(--mono); }
+.ach p.motivo { font-size: 13.5px; line-height: 1.55; margin: 10px 0 0;
+                color: var(--on-surface-variant); }
+.ach .prova { font: 400 11.5px/1.5 var(--mono); color: var(--on-surface-variant);
+              border-top: 1px dashed var(--outline-variant);
+              padding-top: 7px; margin-top: 10px; }
+.acoes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px;
+         padding-top: 10px; border-top: 1px solid var(--surface-container); }
+.acoes button { padding: 6px 12px; font-size: 12px; }
+.hist { margin-top: 10px; font-size: 12px; }
+.hist div { padding: 4px 0; border-top: 1px solid var(--surface-container);
+            color: var(--on-surface-variant); }
+.st { font: 700 10px var(--sans); letter-spacing: .08em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: var(--r-full); }
+.st-aberto { background: var(--error-container); color: var(--on-error-container); }
+.st-em_analise { background: var(--warn-bg); color: var(--warn-fg); }
+.st-respondido { background: var(--secondary-container); color: var(--primary); }
+.st-aceito, .st-resolvido { background: var(--success-bg); color: var(--success-dark); }
+.st-refutado { background: var(--surface-container); color: var(--on-surface-variant); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Achados de auditoria</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Estoque</a>
+    <a href="/importar">Importar</a>
+    <a class="on" href="/achados">Achados</a>
+    <a href="/relatorio">Relatório</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
+
+  <div class="card" style="margin:16px 0">
+    <div class="lbl">Varredura</div>
+    <div class="controls" style="margin:12px 0 0">
+      <input type="date" id="data" value="2023-01-11" min="2022-12-31">
+      <button class="pri" id="varrer">Executar as regras</button>
+      <select id="sev">
+        <option value="">Todas as severidades</option>
+        <option value="critico">Crítico</option>
+        <option value="alto">Alto</option>
+        <option value="medio">Médio</option>
+        <option value="informativo">Informativo</option>
+      </select>
+      <select id="status">
+        <option value="">Em aberto</option>
+        <option value="aberto">Aberto</option>
+        <option value="em_analise">Em análise</option>
+        <option value="respondido">Respondido</option>
+        <option value="aceito">Aceito</option>
+        <option value="refutado">Refutado</option>
+        <option value="__todos">Tudo, inclusive resolvidos</option>
+      </select>
+    </div>
+    <div class="foot muted" id="mat" style="margin-top:10px"></div>
+  </div>
+
+  <div id="lista"><div class="skel">carregando…</div></div>
+</main>
+
+<script src="/app.js"></script>
+<script>ligarSair();</script>
+<script>
+const $ = id => document.getElementById(id);
+const SEV = { critico: 'Crítico', alto: 'Alto', medio: 'Médio', informativo: 'Informativo' };
+const STL = { aberto: 'Aberto', em_analise: 'Em análise', respondido: 'Respondido',
+              aceito: 'Aceito', refutado: 'Refutado', resolvido: 'Resolvido' };
+// Para onde cada status pode ir. Aceito e refutado são desfecho: não voltam.
+const PROX = {
+  aberto: ['em_analise', 'aceito', 'refutado'],
+  em_analise: ['respondido', 'aceito', 'refutado'],
+  respondido: ['aceito', 'refutado', 'em_analise'],
+  aceito: [], refutado: [], resolvido: [],
+};
+
+async function carregar() {
+  const st = $('status').value;
+  const p = new URLSearchParams();
+  if (st === '__todos') p.set('todos', '1');
+  else if (st) { p.set('todos', '1'); p.set('status', st); }
+  if ($('sev').value) p.set('sev', $('sev').value);
+
+  let itens, resumo, mat;
+  try {
+    [itens, resumo, mat] = await Promise.all([
+      api('/api/achados?' + p), api('/api/achados/resumo'), api('/api/materialidade')]);
+  } catch (e) { return falha(e); }
+
+  $('mat').innerHTML =
+    `Materialidade vigente — planejamento <b>${money(mat.planejamento)}</b> · ` +
+    `execução <b>${money(mat.execucao)}</b> · claramente trivial ` +
+    `<b>${money(mat.trivial)}</b>. Achado monetário abaixo do trivial é contado ` +
+    `e não listado; falha estrutural aparece sempre.`;
+
+  $('kpis').innerHTML = [
+    `<div class="card ${+resumo.aberto ? 'alert' : 'good'}"><div class="lbl">Em aberto</div>
+      <div class="val">${n(resumo.aberto)}</div>
+      <div class="foot">${n(resumo.criticos_abertos)} críticos</div></div>`,
+    `<div class="card"><div class="lbl">Em análise</div>
+      <div class="val">${n(resumo.em_analise)}</div>
+      <div class="foot">${n(resumo.respondido)} já respondidos</div></div>`,
+    `<div class="card"><div class="lbl">Desfecho</div>
+      <div class="val">${n(+resumo.aceito + +resumo.refutado)}</div>
+      <div class="foot">${n(resumo.aceito)} aceitos · ${n(resumo.refutado)} refutados</div></div>`,
+    `<div class="card"><div class="lbl">Distorção potencial</div>
+      <div class="val sm">${money(resumo.exposicao_aberta)}</div>
+      <div class="foot">valoração e entradas pendentes</div></div>`,
+    `<div class="card"><div class="lbl">A confirmar com terceiros</div>
+      <div class="val sm">${money(resumo.valor_em_terceiros)}</div>
+      <div class="foot">não é distorção — é posse a comprovar</div></div>`,
+    +resumo.atrasados > 0
+      ? `<div class="card alert"><div class="lbl">Prazo vencido</div>
+          <div class="val">${n(resumo.atrasados)}</div>
+          <div class="foot">exigem retorno</div></div>`
+      : `<div class="card good"><div class="lbl">Prazo vencido</div>
+          <div class="val">0</div><div class="foot">nada atrasado</div></div>`,
+  ].join('');
+
+  $('lista').innerHTML = itens.length ? itens.map(a => `
+    <div class="ach ${a.severidade} st-${a.status}" id="ach-${a.id}">
+      <div class="ach-cab">
+        <span class="id">#${a.id}</span>
+        <span class="st st-${a.status}">${STL[a.status] || a.status}</span>
+        <span class="chip ${a.severidade === 'critico' ? 'err'
+          : a.severidade === 'alto' ? 'warn' : ''}">${SEV[a.severidade]}</span>
+        ${a.uf ? chipUF(a.uf) : ''}
+        ${a.cod_item ? `<b class="mono">${esc(a.cod_item)}</b>` : ''}
+        <span style="flex:1 1 260px">${esc((a.descr_item || '').slice(0, 80))}</span>
+        ${a.valor != null ? `<span class="val">${money(a.valor)}</span>` : ''}
+      </div>
+      <p class="motivo">${esc(a.motivo || '')}</p>
+      ${a.resposta_cliente ? `<p class="motivo"><b>Resposta do cliente:</b>
+        ${esc(a.resposta_cliente)}</p>` : ''}
+      ${a.desfecho ? `<p class="motivo"><b>Desfecho:</b> ${esc(a.desfecho)}</p>` : ''}
+      <div class="prova">${esc(a.prova || '')}<br>
+        detectado ${a.execucoes}× · primeira vez em ${brDate(a.primeira_deteccao)}
+        ${a.resolvido_em ? ' · resolvido em ' + brDate(a.resolvido_em) : ''}</div>
+      <div class="acoes">
+        ${(PROX[a.status] || []).map(s =>
+          `<button data-id="${a.id}" data-st="${s}">${STL[s]}</button>`).join('')}
+        <button data-hist="${a.id}">Histórico (${a.eventos})</button>
+      </div>
+      <div class="hist" id="hist-${a.id}"></div>
+    </div>`).join('')
+    : '<div class="skel">Nenhum achado com este filtro.</div>';
+
+  $('lista').querySelectorAll('button[data-st]').forEach(b => b.onclick = () => mudar(b));
+  $('lista').querySelectorAll('button[data-hist]').forEach(b => b.onclick = () => hist(b));
+}
+
+async function mudar(b) {
+  const st = b.dataset.st;
+  const rotulo = { respondido: 'Cole a resposta do cliente:',
+                   aceito: 'Justificativa do aceite:',
+                   refutado: 'Por que a justificativa não procede:',
+                   em_analise: 'Nota (opcional):' }[st] || 'Nota (opcional):';
+  const nota = prompt(rotulo, '');
+  if (nota === null) return;
+  b.disabled = true;
+  try {
+    await fetch('/api/achados/status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: +b.dataset.id, status: st, nota: nota || null })
+    }).then(r => r.json());
+    await carregar();
+  } catch (e) { b.disabled = false; falha(e); }
+}
+
+async function hist(b) {
+  const alvo = document.getElementById('hist-' + b.dataset.hist);
+  if (alvo.innerHTML) { alvo.innerHTML = ''; return; }
+  const es = await api('/api/achados/eventos?id=' + b.dataset.hist);
+  alvo.innerHTML = es.length ? es.map(e => `<div>
+      ${new Date(e.quando).toLocaleString('pt-BR')} ·
+      <b>${STL[e.de_status] || e.de_status || '—'}</b> →
+      <b>${STL[e.para_status] || e.para_status}</b> · ${esc(e.quem || '')}
+      ${e.nota ? '<br>' + esc(e.nota) : ''}</div>`).join('')
+    : '<div>Sem transições registradas.</div>';
+}
+
+$('varrer').onclick = async () => {
+  const b = $('varrer');
+  b.disabled = true; b.textContent = 'executando…';
+  try {
+    const r = await fetch('/api/varrer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: $('data').value })
+    }).then(x => x.json());
+    if (r.erro) throw new Error(r.erro);
+    alert(`Varredura concluída.\n\n${r.novos} novos · ${r.mantidos} mantidos · ` +
+          `${r.resolvidos} resolvidos\n${r.total_aberto} achados em aberto.`);
+    await carregar();
+  } catch (e) { falha(e); }
+  b.disabled = false; b.textContent = 'Executar as regras';
+};
+
+['sev', 'status'].forEach(id => $(id).onchange = carregar);
+$('data').max = new Date().toISOString().slice(0, 10);
+carregar();
+</script>
+</body>
+</html>

@@ -250,7 +250,30 @@ def sair(body, token=None):
     return {"ok": True}, ""
 
 
-POSTS = {"/api/import/pasta": importar_pasta, "/api/import/upload": importar_upload}
+def mudar_status(body):
+    import getpass
+    quem = os.environ.get("AUDITOR") or getpass.getuser()
+    aid = int((body or {}).get("id") or 0)
+    st = str((body or {}).get("status") or "")
+    nota = (body or {}).get("nota") or None
+    r = query("select * from achado_mudar_status(" + str(aid) + ", '"
+              + st.replace("'", "") + "', '" + quem.replace("'", "") + "', "
+              + ("'" + nota.replace("'", "''") + "'" if nota else "null") + ")")
+    _cache.clear()
+    return r[0] if r else {"erro": "achado nao encontrado"}
+
+
+def rodar_varredura(body):
+    data = str((body or {}).get("data") or "2022-12-31").replace("'", "")
+    import getpass
+    quem = os.environ.get("AUDITOR") or getpass.getuser()
+    r = query("select * from varrer(date '" + data + "', '" + quem.replace("'", "") + "')")
+    _cache.clear()
+    return r[0] if r else {}
+
+
+POSTS = {"/api/import/pasta": importar_pasta, "/api/import/upload": importar_upload,
+         "/api/achados/status": mudar_status, "/api/varrer": rodar_varredura}
 
 # Rotas que dispensam sessão. Todo o resto exige login.
 LIVRES = {"/login", "/login.html", "/app.css", "/app.js", "/favicon.ico",
@@ -279,6 +302,23 @@ ROUTES = {
         + (qs.get("item") or [""])[0].replace("'", "") + "')"),
     "/api/terceiros": lambda qs: query(SQL_TERCEIROS),
     "/api/top": lambda qs: query(SQL_TOP),
+    "/api/achados": lambda qs: query(
+        "select * from v_achado_painel where "
+        + ("1=1" if (qs.get("todos") or [""])[0] == "1"
+           else "status <> 'resolvido'")
+        + (" and severidade = '" + (qs.get("sev") or [""])[0].replace("'", "") + "'"
+           if (qs.get("sev") or [""])[0] in ("critico","alto","medio","informativo") else "")
+        + (" and status = '" + (qs.get("status") or [""])[0].replace("'", "") + "'"
+           if (qs.get("status") or [""])[0] in
+              ("aberto","em_analise","respondido","aceito","refutado","resolvido") else "")
+        + " order by ordem_status, ordem_sev, valor desc nulls last limit 400"),
+    "/api/achados/resumo": lambda qs: query("select * from v_achado_resumo")[0],
+    "/api/achados/eventos": lambda qs: query(
+        "select * from achado_evento where achado_id = "
+        + str(int((qs.get("id") or ["0"])[0])) + " order by quando"),
+    "/api/materialidade": lambda qs: query("select * from materialidade_vigente()")[0],
+    "/api/varreduras": lambda qs: query(
+        "select * from varredura order by executada_em desc limit 20"),
     "/api/relatorio": lambda qs: query(
         "select * from relatorio_achados(date '"
         + (qs.get("data") or ["2022-12-31"])[0].replace("'", "") + "')"),
@@ -490,6 +530,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/importar.html"
         if path == "/relatorio":
             path = "/relatorio.html"
+        if path == "/achados":
+            path = "/achados.html"
         if path == "/login":
             path = "/login.html"
 

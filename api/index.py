@@ -185,6 +185,17 @@ ROTAS = {
             "p_cod_item": (qs.get("item") or [""])[0]}),
     "/api/top": lambda qs: consulta_rest(
         "v_inventario", {"order": "vl_item.desc", "limit": 12}),
+    "/api/achados": lambda qs: consulta_rest("v_achado_painel", dict(
+        {"order": "ordem_status.asc,ordem_sev.asc,valor.desc", "limit": 400},
+        **({} if (qs.get("todos") or [""])[0] == "1" else {"status": "neq.resolvido"}),
+        **({"severidade": "eq." + (qs.get("sev") or [""])[0]}
+           if (qs.get("sev") or [""])[0] else {}))),
+    "/api/achados/resumo": lambda qs: um(consulta_rest("v_achado_resumo")),
+    "/api/achados/eventos": lambda qs: consulta_rest("achado_evento", {
+        "achado_id": "eq." + str(int((qs.get("id") or ["0"])[0])), "order": "quando.asc"}),
+    "/api/materialidade": lambda qs: um(consulta_rest("rpc/materialidade_vigente")),
+    "/api/varreduras": lambda qs: consulta_rest("varredura",
+        {"order": "executada_em.desc", "limit": 20}),
     "/api/relatorio": lambda qs: consulta_rest("rpc/relatorio_achados", {
         "p_data": (qs.get("data") or ["2022-12-31"])[0]}),
     "/api/relatorio/resumo": lambda qs: um(consulta_rest("rpc/relatorio_resumo", {
@@ -284,6 +295,8 @@ def app(environ, start_response):
         caminho = "/importar.html"
     elif caminho == "/relatorio":
         caminho = "/relatorio.html"
+    elif caminho == "/achados":
+        caminho = "/achados.html"
     elif caminho == "/login":
         caminho = "/login.html"
 

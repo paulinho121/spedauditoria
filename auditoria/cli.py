@@ -7,6 +7,9 @@ Linha de comando da auditoria.
   python -m auditoria status              o que já está no banco
   python -m auditoria importar <arqs...>  importa EFDs (idempotente)
   python -m auditoria conferir <arqs...>  só valida, não grava
+  python -m auditoria varrer [data]       executa as regras e concilia os achados
+  python -m auditoria achados [filtro]    lista os achados em aberto
+  python -m auditoria materialidade       mostra ou define os limiares
 """
 import glob
 import os
@@ -186,7 +189,89 @@ def cmd_ressalvas(_):
     return 0
 
 
-COMANDOS = {"config": cmd_config, "migrar": cmd_migrar, "status": cmd_status,
+def cmd_varrer(args):
+    """Executa as regras e concilia com os achados já registrados."""
+    import getpass
+    data = args[0] if args else "2022-12-31"
+    quem = os.environ.get("AUDITOR") or getpass.getuser()
+    con = db.conecta()
+    m = con.consulta("select * from materialidade_vigente()")
+    if not m:
+        print("\n  ERRO: nenhuma materialidade definida.")
+        return 1
+    m = m[0]
+    print(f"\nVarredura em {data}\n" + "-" * 66)
+    print(f"  materialidade  planejamento R$ {_fmt(m['planejamento'])} · "
+          f"execução R$ {_fmt(m['execucao'])} · trivial R$ {_fmt(m['trivial'])}")
+    r = con.consulta("select * from varrer(%s::date, %s)", (data, quem))[0]
+    print(f"  novos {r['novos']} · mantidos {r['mantidos']} · "
+          f"resolvidos {r['resolvidos']} · em aberto {r['total_aberto']}\n")
+    for x in con.consulta("select severidade, status, count(*) n from achado "
+                          "where status <> 'resolvido' group by 1,2 order by 1,2"):
+        print(f"    {x['severidade']:<13}{x['status']:<13}{x['n']:>4}")
+    return 0
+
+
+def cmd_achados(args):
+    con = db.conecta()
+    filtro = args[0] if args else ""
+    w = "1=1" if filtro == "todos" else "status <> 'resolvido'"
+    if filtro in ("critico", "alto", "medio", "informativo"):
+        w = f"status <> 'resolvido' and severidade = '{filtro}'"
+    print("\nAchados\n" + "-" * 96)
+    for a in con.consulta(f"""select id, severidade, status, uf, cod_item,
+                              left(coalesce(descr_item,''),34) d, valor
+                              from v_achado_painel where {w}
+                              order by ordem_sev, valor desc nulls last limit 60"""):
+        v = f"R$ {_fmt(a['valor'])}" if a["valor"] is not None else "—"
+        print(f"  #{a['id']:<4}{a['severidade']:<11}{a['status']:<12}"
+              f"{(a['uf'] or '--'):<4}{(a['cod_item'] or ''):<12}{a['d']:<36}{v:>16}")
+    r = con.consulta("select * from v_achado_resumo")[0]
+    print(f"\n  aberto {r['aberto']} · em análise {r['em_analise']} · respondido "
+          f"{r['respondido']} · aceito {r['aceito']} · refutado {r['refutado']} "
+          f"· resolvido {r['resolvido']}")
+    if r["atrasados"]:
+        print(f"  ATENÇÃO: {r['atrasados']} achado(s) com prazo vencido")
+    return 0
+
+
+def cmd_materialidade(args):
+    """Sem argumento mostra a vigente; com três números, registra uma nova."""
+    import getpass
+    con = db.conecta()
+    if not args:
+        m = con.consulta("select * from materialidade_vigente()")[0]
+        print("\nMaterialidade vigente\n" + "-" * 66)
+        print(f"  planejamento .......... R$ {_fmt(m['planejamento'])}")
+        print(f"  execução .............. R$ {_fmt(m['execucao'])}")
+        print(f"  claramente trivial .... R$ {_fmt(m['trivial'])}")
+        print(f"\n  divergência de valoração a partir de {m['mult_valoracao']}x")
+        print(f"  dispersão entre filiais a partir de {m['mult_dispersao']}x")
+        print(f"  margem negativa a partir de {m['pct_margem_negativa']}%")
+        print(f"  sem giro a partir de {m['meses_sem_giro']} meses")
+        print(f"\n  definida por {m['definido_por']} em {m['definido_em']}")
+        if m["observacao"]:
+            print(f"  {m['observacao']}")
+        print("\n  Para alterar:")
+        print("    python -m auditoria materialidade <planejamento> <execução> <trivial>")
+        return 0
+    if len(args) < 3:
+        print("  Informe os três valores: planejamento, execução e trivial.")
+        return 1
+    vals = [float(a.replace(".", "").replace(",", ".")) for a in args[:3]]
+    quem = os.environ.get("AUDITOR") or getpass.getuser()
+    con.executa("insert into materialidade (escopo, planejamento, execucao, trivial,"
+                " definido_por, observacao) values ('padrao', %s, %s, %s, %s, %s)",
+                (vals[0], vals[1], vals[2], quem, "Definida pelo auditor"))
+    print(f"\n  Registrada: planejamento R$ {_fmt(vals[0])} · "
+          f"execução R$ {_fmt(vals[1])} · trivial R$ {_fmt(vals[2])}")
+    print("  Rode 'varrer' de novo para reavaliar os achados com os novos limiares.")
+    return 0
+
+
+COMANDOS = {"varrer": cmd_varrer, "achados": cmd_achados,
+            "materialidade": cmd_materialidade,
+            "config": cmd_config, "migrar": cmd_migrar, "status": cmd_status,
             "importar": cmd_importar, "conferir": cmd_conferir,
             "congelar": cmd_congelar, "ressalvas": cmd_ressalvas}
 
