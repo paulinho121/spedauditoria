@@ -14,6 +14,7 @@ Diferenças em relação ao servidor local (app/server.py):
 """
 import json
 import os
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -40,8 +41,10 @@ class Erro(Exception):
     pass
 
 
-def _http(metodo, url, corpo=None, headers=None, timeout=20):
-    dados = json.dumps(corpo).encode() if corpo is not None else None
+def _http(metodo, url, corpo=None, headers=None, timeout=20, default=None):
+    # default trata date e Decimal, que o json nao serializa sozinho e que
+    # aparecem no payload de importacao.
+    dados = json.dumps(corpo, default=default).encode() if corpo is not None else None
     req = urllib.request.Request(url, data=dados, method=metodo)
     for k, v in (headers or {}).items():
         req.add_header(k, v)
@@ -226,7 +229,7 @@ ROTAS = {
     "/api/datas": lambda qs: consulta_rest("v_datas_movimento",
                                            {"order": "dt.desc"}),
     "/api/import/status": lambda qs: dict(um(consulta_rest("v_import_status")),
-                                          importacao=bool(DATABASE_URL)),
+                                          importacao=bool(SERVICE), pasta=False),
     "/api/import/pendentes": lambda qs: consulta_rest(
         "item_pendente", {"status": "eq.aberto", "order": "vl_total.desc", "limit": 200}),
     "/api/import/cfop/detalhe": lambda qs: consulta_rest(
@@ -239,6 +242,83 @@ ROTAS = {
     "/api/import/notas": lambda qs: consulta_rest(
         "v_notas", {"order": "dt_emi.desc", "limit": 200}),
 }
+
+
+def chama_rpc(fn, payload, timeout=55):
+    """POST numa função do banco. Um round-trip grava o arquivo inteiro."""
+    if not (REF and SERVICE):
+        raise Erro("SUPABASE_SERVICE_KEY não configurada.")
+    _sobe_auditoria()
+    from auditoria import carga_json
+    codigo, dados = _http("POST", f"https://{REF}.supabase.co/rest/v1/rpc/{fn}",
+                          {"p": payload},
+                          {"apikey": SERVICE, "Authorization": f"Bearer {SERVICE}"},
+                          timeout=timeout, default=carga_json._json)
+    if codigo >= 400:
+        raise Erro(f"{fn}: {str(dados)[:220]}")
+    return dados if isinstance(dados, dict) else {}
+
+
+def _sobe_auditoria():
+    if RAIZ not in sys.path:
+        sys.path.insert(0, RAIZ)
+
+
+def importar_upload(corpo):
+    """
+    Importa os arquivos enviados pelo navegador.
+
+    Grava em /tmp — o único diretório gravável numa função serverless. Ser
+    efêmero não atrapalha: o arquivo só precisa existir enquanto o parser lê.
+
+    A gravação no banco vai numa chamada por arquivo, pelas funções
+    importar_efd e importar_nfe. A carga original fazia ~220 chamadas por EFD e
+    não cabia no limite de tempo da função.
+    """
+    _sobe_auditoria()
+    import tempfile
+    from collections import Counter
+    from auditoria import carga_json
+
+    pasta = tempfile.mkdtemp(prefix="fs_")
+    saida = []
+    for arq in (corpo or {}).get("arquivos", []):
+        nome = os.path.basename(arq.get("nome") or "")
+        if not nome:
+            continue
+        caminho = os.path.join(pasta, nome)
+        # EFD é latin-1 por definição do layout; NF-e é UTF-8.
+        cod = "latin-1" if nome.lower().endswith(".txt") else "utf-8"
+        try:
+            with open(caminho, "w", encoding=cod, errors="replace", newline="") as fh:
+                fh.write(arq.get("conteudo") or "")
+            if nome.lower().endswith(".xml"):
+                payload, probs = carga_json.payload_nfe(caminho)
+                r = chama_rpc("importar_nfe", payload)
+            else:
+                payload, probs = carga_json.payload_efd(caminho)
+                r = chama_rpc("importar_efd", payload)
+        except Exception as e:
+            saida.append({"arquivo": nome, "situacao": "ignorado",
+                          "avisos": [f"{type(e).__name__}: {e}"],
+                          "movimentos": 0, "pendencias": 0})
+            continue
+        saida.append({
+            "arquivo": nome, "situacao": r.get("situacao", "?"),
+            "nfe_id": r.get("nfe_id"), "arquivo_id": r.get("arquivo_id"),
+            "movimentos": r.get("movimentos") or 0,
+            "pendencias": r.get("pendencias") or 0,
+            "contagens": r.get("contagens"),
+            "avisos": [f"{t}: {m}" for t, m in (probs or [])],
+        })
+
+    if not saida:
+        return {"erro": "nenhum arquivo recebido"}
+    return {"resumo": {"total": len(saida),
+                       "por_situacao": dict(Counter(x["situacao"] for x in saida)),
+                       "movimentos": sum(x["movimentos"] for x in saida),
+                       "pendencias": sum(x["pendencias"] for x in saida)},
+            "arquivos": saida}
 
 
 def estatico(caminho):
@@ -338,10 +418,20 @@ def app(environ, start_response):
                             json.dumps({"erro": f"{type(e).__name__}: {e}"}))
 
     # Importação não roda em serverless: sem disco e com limite de tempo.
+    if caminho == "/api/import/upload" and metodo == "POST":
+        try:
+            return responde("200 OK", json.dumps(importar_upload(corpo), default=str))
+        except Erro as e:
+            return responde("500 Internal Server Error", json.dumps({"erro": str(e)}))
+        except Exception as e:
+            return responde("500 Internal Server Error",
+                            json.dumps({"erro": f"{type(e).__name__}: {e}"}))
+
     if caminho.startswith("/api/import/") and metodo == "POST":
         return responde("501 Not Implemented", json.dumps({
-            "erro": "A importação roda apenas localmente. Use: "
-                    "python -m auditoria importar <arquivos>"}))
+            "erro": "Importar de uma pasta exige o servidor local: aqui não há "
+                    "acesso ao seu disco. Arraste os arquivos, ou use "
+                    "python -m auditoria importar <arquivos>."}))
 
     # O manual vem da raiz do repositorio, nao de app/static.
     if caminho in ("/MANUAL.md", "/README.md"):

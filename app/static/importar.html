@@ -312,9 +312,19 @@ async function painel() {
       api('/api/import/cfops'), api('/api/import/notas')]);
   } catch (e) { return falha(e); }
 
+  // Enviar arquivo funciona nos dois ambientes; varrer pasta exige disco,
+  // que a versão publicada não tem.
   if (k.importacao === false) {
     document.getElementById('so-local').hidden = false;
     document.getElementById('envio').hidden = true;
+  } else if (k.pasta === false) {
+    const cartaoPasta = document.getElementById('pasta').closest('.card');
+    cartaoPasta.innerHTML =
+      '<div class="lbl">Importar de uma pasta</div>' +
+      '<p style="margin:10px 0 0;font-size:13.5px;color:var(--on-surface-variant)">' +
+      'Só no servidor local: esta versão publicada não tem acesso ao seu disco. ' +
+      'Arraste os arquivos ao lado, ou rode <span class="mono">python -m auditoria ' +
+      'importar</span> na sua máquina para lotes grandes.</p>';
   }
 
   const periodo = k.primeira ? `${brDate(k.primeira)} a ${brDate(k.ultima)}` : 'nenhuma nota ainda';

@@ -280,7 +280,7 @@ LIVRES = {"/login", "/login.html", "/app.css", "/app.js", "/favicon.ico",
           "/api/auth/login"}
 
 ROUTES = {
-    "/api/import/status": lambda qs: dict(query(SQL_IMPORT_STATUS)[0], importacao=True),
+    "/api/import/status": lambda qs: dict(query(SQL_IMPORT_STATUS)[0], importacao=True, pasta=True),
     "/api/import/pendentes": lambda qs: query(SQL_PENDENTES),
     "/api/import/cfop/detalhe": lambda qs: query(
         "select * from cfop_aberto_detalhe('"
