@@ -97,6 +97,18 @@ input[type=date] {
 <script>ligarSair();</script>
 <script>
 const $ = id => document.getElementById(id);
+const TIPO_ROTULO = {
+  valoracao: 'Divergência de valoração',
+  saldo_negativo: 'Saldo negativo',
+  terceiros: 'Em poder de terceiros',
+  cfop_aberto: 'CFOP sem classificação',
+  item_pendente: 'Item sem correspondência',
+  sem_documento: 'Nota sem XML',
+  nao_escriturada: 'Emitida e não escriturada',
+  transferencia_divergente: 'Transferência divergente',
+  cobertura_item: 'Sem detalhe por item',
+  ressalva: 'Ressalva assumida',
+};
 const SEV = { critico: 'Crítico', alto: 'Alto', medio: 'Médio', informativo: 'Informativo' };
 const STL = { aberto: 'Aberto', em_analise: 'Em análise', respondido: 'Respondido',
               aceito: 'Aceito', refutado: 'Refutado', resolvido: 'Resolvido' };
@@ -155,6 +167,7 @@ async function carregar() {
     <div class="ach ${a.severidade} st-${a.status}" id="ach-${a.id}">
       <div class="ach-cab">
         <span class="id">#${a.id}</span>
+        <span class="muted" style="font-size:11.5px">${TIPO_ROTULO[a.tipo] || a.tipo}</span>
         <span class="st st-${a.status}">${STL[a.status] || a.status}</span>
         <span class="chip ${a.severidade === 'critico' ? 'err'
           : a.severidade === 'alto' ? 'warn' : ''}">${SEV[a.severidade]}</span>
