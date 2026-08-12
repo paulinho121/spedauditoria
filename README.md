@@ -128,9 +128,9 @@ api/             função serverless do Vercel — somente leitura
 tests/           testes do parser e golden files
 ```
 
-O painel publicado no Vercel **não importa arquivos**: importação exige disco e
-minutos de execução, que serverless não oferece. Ela roda localmente, pelo CLI
-ou pela tela de importação do servidor local.
+O painel publicado importa arquivos enviados pelo navegador: cada um é gravado
+numa única chamada ao banco, dentro de uma transação. **Varrer uma pasta**
+continua exigindo o servidor local, porque depende do disco do auditor.
 
 ## Segurança
 

@@ -1,32 +1,32 @@
 # Manual do usuário — Fiscal Stock
 
-Este manual segue a ordem de um trabalho real: preparar, carregar, definir o
-critério, examinar, tratar os achados e emitir o papel de trabalho.
+Este manual segue a ordem de um trabalho real: acessar, carregar, definir o
+ponto de partida e o critério, examinar, tratar os achados e emitir o papel de
+trabalho.
 
 ---
 
-## 1. Antes de começar
+## 1. Acessar o sistema
 
-### Ligar o sistema
+O sistema funciona **inteiramente pelo navegador**. Entre com seu e-mail e senha
+e comece a trabalhar — não é preciso instalar nem rodar nada.
+
+Há uma única coisa que exige a sua máquina: **importar uma pasta inteira de
+arquivos**. Enviar arquivos arrastando funciona online normalmente. A diferença
+aparece só quando você tem centenas ou milhares de XML de uma vez.
+
+### Quando usar o servidor local
 
 ```bash
 python C:\Users\Acer\Desktop\fiscal\app\server.py
 ```
 
-Abre em `http://localhost:8777`. Entre com seu e-mail e senha do Supabase Auth.
+Abre em `http://localhost:8777`, com as mesmas telas mais a opção de varrer uma
+pasta do computador. Use nas cargas grandes — por exemplo, os XML de um ano
+inteiro.
 
-O servidor recarrega sozinho quando o código muda. Se a interface parecer
-antiga, é cache do navegador — **Ctrl+F5** resolve.
-
-### Conferir a configuração
-
-```bash
-python -m auditoria config
-```
-
-Se aparecer `backend: Management API (degradado)`, o sistema está funcionando
-mas devagar (cerca de 1,4 s por consulta). Preencha `DATABASE_URL` no `.env`
-para cair para milissegundos.
+Rodando local, se a interface parecer antiga depois de uma atualização, é cache
+do navegador: **Ctrl+F5**.
 
 ---
 
@@ -34,35 +34,39 @@ para cair para milissegundos.
 
 ### Conferir antes de importar
 
-Sempre vale rodar primeiro. Nada é gravado:
+Vale rodar primeiro. Nada é gravado:
 
 ```bash
 python -m auditoria conferir "C:\caminho\*.txt"
 ```
 
 Mostra CNPJ, período, perfil, quantidade de registros e os problemas
-encontrados — inclusive quanto do movimento tem detalhe por item, que determina
-o que vai ser possível apurar.
+encontrados — inclusive quanto do movimento tem detalhe por item, o que
+determina o que vai ser possível apurar.
 
 ### Importar
 
-```bash
-python -m auditoria importar "C:\caminho\*.txt"      # EFD
-python -m auditoria importar "C:\caminho\*.xml"      # NF-e
-```
+Na tela **Importar**, arraste os arquivos EFD (`.txt`) ou NF-e (`.xml`) para a
+área tracejada. Vale online e local.
 
-Ou pela tela **Importar**: arraste os arquivos, ou informe uma pasta e o
-servidor varre recursivamente. Para lotes grandes prefira a pasta — o navegador
-engasga com milhares de arquivos.
+Pelo terminal, em qualquer volume:
+
+```bash
+python -m auditoria importar "C:\caminho\*.txt"
+python -m auditoria importar "C:\caminho\*.xml"
+```
 
 **A importação é idempotente.** O sistema calcula o SHA-256 de cada arquivo;
 reimportar o mesmo conteúdo não faz nada. Um arquivo retificador não sobrescreve
 o anterior: entra como nova versão e marca a anterior como não vigente,
 preservando o histórico.
 
+Cada arquivo é gravado em uma única operação, dentro de uma transação. Se algo
+falhar no meio, nada daquele arquivo entra.
+
 ### O que observar depois de importar
 
-Na tela **Importar**, dois cartões travam o trabalho se estiverem acima de zero:
+Dois cartões travam o trabalho se estiverem acima de zero:
 
 - **CFOP não classificado** — enquanto houver, os itens dessas notas não geram
   movimento e o saldo apurado está incompleto. Clique para ver as notas e
@@ -87,8 +91,10 @@ O saldo de abertura é o ponto zero do Kardex, e é **imutável**.
 python -m auditoria congelar 2022-12-31
 ```
 
-Congela o inventário daquela data como abertura. Rodar de novo não altera nada —
-se precisar refazer, é decisão consciente e exige limpar a tabela.
+Congela o inventário daquela data como abertura. Rodar de novo não altera nada.
+
+Uma vez congelado, o banco passa a proteger os arquivos que o originaram: não é
+possível apagá-los enquanto o saldo de abertura os referenciar.
 
 ---
 
@@ -115,10 +121,10 @@ Na ordem: planejamento, execução e claramente trivial.
 | **Execução** | Margem de segurança, tipicamente 60–75% do planejamento |
 | **Claramente trivial** | Abaixo disto o achado é contado e não listado |
 
-O corte de trivialidade só vale para achado de natureza monetária. Falha
-estrutural — saldo negativo, CFOP aberto, nota sem documento — aparece sempre,
-por menor que seja o valor. Um saldo negativo com valor zero é dos mais graves:
-significa que o item nunca teve entrada.
+O corte de trivialidade só vale para achado de natureza **monetária** —
+divergência de valoração e item pendente. Falha estrutural aparece sempre, por
+menor que seja o valor: um saldo negativo com valor zero é dos mais graves,
+porque significa que o item nunca teve entrada.
 
 Os limiares constam do papel de trabalho.
 
@@ -127,17 +133,12 @@ Os limiares constam do papel de trabalho.
 ## 5. Examinar o estoque
 
 Tela **Estoque**. Escolha a data e o sistema apura a posição percorrendo os
-movimentos até ali.
+movimentos até ali, com custo médio ponderado móvel. Saídas baixam pelo custo
+vigente, nunca pelo valor da nota de venda.
 
 **Filtros** combinam entre si: data, busca por descrição, código ou NCM, filial,
-situação e ordenação.
-
-O seletor de situação tem quatro opções:
-
-- Todos os itens
-- Somente saldo negativo
-- Somente em poder de terceiros
-- Somente em seu poder
+situação e ordenação. O seletor de situação separa saldo negativo, mercadoria em
+poder de terceiros e mercadoria em seu poder.
 
 O cartão **Saldo negativo** também funciona como botão: clicar filtra, clicar de
 novo limpa.
@@ -165,6 +166,21 @@ persistem, marca como resolvidos os que sumiram. Nunca apaga, e nunca reabre um
 achado que você já tratou.
 
 Varrer uma data antiga não resolve achado de período posterior.
+
+### As dez famílias de achado
+
+| Família | Severidade | O que aponta |
+|---|---|---|
+| Divergência de valoração | crítico | Item inventariado por custo distante do documentado |
+| Emitida e não escriturada | crítico | NF-e autorizada ausente da escrituração |
+| Transferência divergente | crítico | Mesma nota com totais diferentes nas duas filiais |
+| Saldo negativo | alto / médio | Saldo abaixo de zero na data |
+| Em poder de terceiros | alto | Mercadoria própria com terceiro |
+| CFOP sem classificação | alto | Bloqueia a geração do movimento |
+| Nota sem XML | alto | Escriturada sem o documento para confrontar |
+| Item sem correspondência | médio | Código do fornecedor ainda sem de-para |
+| Sem detalhe por item | informativo | Escrituração sem C170 |
+| Ressalva assumida | informativo | Limitação decidida por você |
 
 ### Ciclo de vida
 
@@ -226,6 +242,10 @@ direto, sem remontar colunas.
 
 ## 8. Perguntas frequentes
 
+**Preciso instalar alguma coisa?**
+Não, para o uso normal. Só para importar uma pasta inteira de arquivos, que
+exige o servidor local.
+
 **O saldo mudou de uma consulta para outra.**
 Confira a data selecionada. A posição é apurada até aquela data; qualquer
 movimento posterior não entra.
@@ -241,17 +261,22 @@ Saldo negativo quase sempre é entrada faltando, não estoque inexistente: a sa�
 foi escriturada e a compra correspondente não. Confira se as notas de entrada do
 período foram importadas e se algum CFOP ficou sem classificação.
 
-**A tela publicada não deixa importar.**
-Correto. A versão no Vercel só consulta — importação exige ler arquivos do seu
-computador e leva minutos, o que serverless não permite. Use o servidor local.
+**Importei um arquivo e nada mudou.**
+Provavelmente já estava importado. O sistema identifica pelo conteúdo, não pelo
+nome: um arquivo renomeado continua sendo o mesmo. A tela mostra *já estava*.
+
+**"Importar pasta" não funciona no site publicado.**
+Correto. Aquele servidor não tem acesso ao seu disco. Arraste os arquivos, ou
+use o servidor local para lotes grandes.
 
 **O painel diz que não consegue ler o banco.**
 No plano gratuito, o projeto Supabase pausa por inatividade. Abra o painel do
-Supabase para religá-lo e recarregue.
+Supabase para religá-lo e recarregue. O serviço também apresenta instabilidade
+ocasional — se a mensagem falar em *bad gateway*, tente de novo em um minuto.
 
-**Mudei um arquivo `.py` e nada mudou.**
-O servidor local recarrega sozinho, mas o navegador guarda CSS e JavaScript em
-cache. **Ctrl+F5**.
+**Mudei um arquivo do sistema e nada mudou.**
+Rodando local, o servidor recarrega sozinho, mas o navegador guarda CSS e
+JavaScript em cache. **Ctrl+F5**.
 
 ---
 
@@ -262,6 +287,9 @@ Saber o limite é parte do trabalho.
 - **Custo de importação.** II, IPI, frete internacional, seguro e despesas
   aduaneiras vêm da DI/DUIMP, que ainda não são lidas. Enquanto isso, mercadoria
   importada entra pelo valor da nota — sistematicamente por baixo.
+- **Conciliação item a item entre EFD e XML.** O motor existe, mas depende de as
+  duas fontes cobrirem os mesmos períodos. Hoje quase não há sobreposição, e o
+  sistema aponta isso como achado.
 - **Bloco K.** Produção e estoque escriturado para indústria. Os arquivos atuais
   são de comércio e trazem esses registros vazios.
 - **Corte de período e sequência de numeração.** Exigem escrituração contínua de
