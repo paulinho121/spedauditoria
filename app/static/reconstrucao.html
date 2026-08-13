@@ -215,6 +215,11 @@ function marcar() {
 
 
 // ---------------------------------------------------------------- ficha do item
+const NAT = {
+  abertura: 'abertura', transferencia: 'transferência', posse: 'muda de posse',
+  entrada: 'entrada', saida: 'saída', simbolico: 'simbólico',
+};
+
 async function abrirFicha(item) {
   const ate = $('data').value;
   const { corpo } = abrirPainel(
@@ -250,7 +255,7 @@ async function abrirFicha(item) {
     <div class="wrap">
       <table>
         <thead><tr>
-          <th>#</th><th>Data</th><th>Documento</th><th class="desc">Natureza</th>
+          <th>#</th><th>Data</th><th>Documento</th><th>Movimento</th>
           <th>CFOP</th><th class="desc">Contraparte</th>
           <th class="num">Entrada</th><th class="num">Saída</th>
           <th class="num">Vl. unit.</th><th class="num">Saldo</th>
@@ -260,9 +265,13 @@ async function abrirFicha(item) {
           <td class="mono">${m.seq}</td>
           <td class="mono">${brDate(m.dt)}</td>
           <td class="mono">${m.num_nf ? esc(m.num_nf) + '/' + esc(m.serie || '') : '<span class="muted">abertura</span>'}</td>
-          <td class="desc">${esc((m.natureza || '').slice(0, 40))}</td>
+          <td><span class="nat nat-${m.natureza_mov}" title="${
+              esc(m.natureza || '')}">${NAT[m.natureza_mov] || m.natureza_mov}</span></td>
           <td class="mono" title="${esc(m.cfop_descr || '')}">${esc(m.cfop || '—')}</td>
-          <td class="desc">${esc((m.contraparte || '—').slice(0, 34))}</td>
+          <td class="desc">${m.interna
+              ? chipUF(m.contraparte_uf) + ' <span class="muted">' +
+                esc((m.contraparte || '').slice(0, 26)) + '</span>'
+              : esc((m.contraparte || '—').slice(0, 34))}</td>
           <td class="num ent">${m.entrada ? n(m.entrada) : ''}</td>
           <td class="num sai">${m.saida ? n(m.saida) : ''}</td>
           <td class="num">${m.vl_unit_mov ? money(m.vl_unit_mov) : '—'}</td>
@@ -277,6 +286,10 @@ async function abrirFicha(item) {
       O saldo e o custo médio são corridos: cada linha mostra a posição depois
       daquele movimento. Saídas baixam pelo custo médio vigente — a coluna
       Vl. unit. numa venda é o preço da nota, não o custo.
+      <br><b>Transferência</b> é movimento entre filiais do próprio grupo, e a
+      sigla mostra qual. <b>Muda de posse</b> não altera o patrimônio: a
+      mercadoria sai do seu poder e continua sendo sua — é o caso da remessa
+      para armazém geral e da remessa em locação.
     </p>`;
 }
 

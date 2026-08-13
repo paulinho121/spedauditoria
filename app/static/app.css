@@ -211,3 +211,26 @@ tbody tr.clicavel[data-uf="SC"]:hover td:first-child { box-shadow: inset 4px 0 0
 tr.clicavel { cursor: pointer; }
 td.ent { color: var(--success-dark); font-weight: 600; }
 td.sai { color: var(--error); font-weight: 600; }
+
+/* ---------- direção do movimento na ficha do item ----------
+   Entrada e saída são direções, não julgamento. Usar o vermelho de erro em
+   toda venda faria o Kardex parecer cheio de problema — e nesta ferramenta
+   vermelho já significa achado. Verde-azulado e terracota se distinguem entre
+   si, não colidem com erro, conforme nem atenção, e o sinal + / − garante a
+   leitura mesmo sem enxergar cor. */
+td.ent, td.sai { font-weight: 700; font-variant-numeric: tabular-nums; }
+td.ent { color: #0b6b57; }
+td.sai { color: #a8480f; }
+td.ent::before { content: "+"; opacity: .55; margin-right: 1px; }
+td.sai::before { content: "−"; opacity: .55; margin-right: 1px; }
+td.ent:empty::before, td.sai:empty::before { content: ""; }
+
+/* natureza do movimento */
+.nat { font: 700 10px var(--sans); letter-spacing: .06em; text-transform: uppercase;
+       padding: 3px 8px; border-radius: var(--r-full); white-space: nowrap; }
+.nat-abertura      { background: var(--surface-container); color: var(--on-surface-variant); }
+.nat-transferencia { background: #e4ecfb; color: #22376b; }
+.nat-posse         { background: var(--warn-bg); color: var(--warn-fg); }
+.nat-entrada       { background: #d9f0e9; color: #0b6b57; }
+.nat-saida         { background: #fbe6d8; color: #a8480f; }
+.nat-simbolico     { background: var(--surface-low); color: var(--on-surface-variant); }

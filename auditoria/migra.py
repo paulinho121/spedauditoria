@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Aplicador de migrações.
 
@@ -52,13 +52,35 @@ def _arquivos():
     return out
 
 
+def _confere_numeracao(arquivos):
+    """
+    Dois arquivos com o mesmo número são a mesma migração para o controle, que
+    guarda só o número. O segundo chegava como 'ALTERADA' e o aplicador mandava
+    criar uma migração nova — quando o problema era outro. Melhor recusar cedo,
+    com o diagnóstico certo.
+    """
+    vistos = {}
+    for m in arquivos:
+        vistos.setdefault(m["versao"], []).append(m["arquivo"])
+    duplicados = {v: nomes for v, nomes in vistos.items() if len(nomes) > 1}
+    if duplicados:
+        linhas = "\n".join(f"    {v}: " + ", ".join(sorted(n))
+                           for v, n in sorted(duplicados.items()))
+        raise RuntimeError(
+            "Número de migração repetido:\n" + linhas +
+            "\n  Cada migração precisa de um número próprio. Renumere a mais "
+            "recente para o próximo livre.")
+
+
 def estado():
     con = db.conecta()
     con.executa(CONTROLE)
     aplicadas = {r["versao"]: r for r in
                  con.consulta("select versao, nome, sha256, aplicada_em from schema_migracao")}
+    arquivos = _arquivos()
+    _confere_numeracao(arquivos)
     saida = []
-    for mig in _arquivos():
+    for mig in arquivos:
         ap = aplicadas.get(mig["versao"])
         if ap is None:
             situacao = "pendente"
