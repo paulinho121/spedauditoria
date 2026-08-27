@@ -272,8 +272,66 @@ def rodar_varredura(body):
     return r[0] if r else {}
 
 
+def _texto(body, campo, tam=120):
+    v = (body or {}).get(campo)
+    v = ("" if v is None else str(v)).strip()[:tam]
+    return "'" + v.replace("'", "''") + "'" if v else "null"
+
+
+def trabalho_usar(body):
+    """
+    Troca o trabalho em uso. Limpa o cache: ele guarda o resultado por SQL, e o
+    mesmo SQL passa a devolver outra coisa — sem isso o painel continuaria
+    mostrando os números do trabalho anterior.
+    """
+    tid = int((body or {}).get("id") or 0)
+    r = query(f"select * from trabalho_usar({tid}, {_texto(body, 'quem')})")
+    _cache.clear()
+    return r[0] if isinstance(r, list) and r else r
+
+
+def trabalho_novo(body):
+    nome = str((body or {}).get("nome") or "").strip()
+    if not nome:
+        return {"erro": "Dê um nome ao trabalho."}
+    r = query("select * from trabalho_novo(" + _texto(body, "nome")
+              + ", " + _texto(body, "cliente")
+              + ", " + _texto(body, "exercicio")
+              + ", " + _texto(body, "descricao", 600)
+              + ", " + _texto(body, "quem") + ", true)")
+    _cache.clear()
+    return r[0] if isinstance(r, list) and r else r
+
+
+def trabalho_excluir(body):
+    """
+    Apaga um trabalho e, por cascata, os dados dele. Duas travas: o nome tem de
+    ser digitado igual, e o último trabalho não pode ser excluído — o sistema
+    ficaria sem trabalho ativo e todas as telas em branco.
+    """
+    tid = int((body or {}).get("id") or 0)
+    confirma = str((body or {}).get("confirma") or "")
+    ts = query("select id, nome, ativo from v_trabalho order by id")
+    alvo = next((t for t in ts if t["id"] == tid), None)
+    if alvo is None:
+        return {"erro": "Trabalho não encontrado."}
+    if len(ts) == 1:
+        return {"erro": "Este é o único trabalho. Crie outro antes de excluir este."}
+    if confirma.strip() != alvo["nome"]:
+        return {"erro": "O nome digitado não confere. Nada foi apagado."}
+    query(f"delete from trabalho where id = {tid}")
+    _cache.clear()
+    if alvo["ativo"]:
+        resto = [t for t in ts if t["id"] != tid][0]
+        query(f"select trabalho_usar({resto['id']}, {_texto(body, 'quem')})")
+        _cache.clear()
+    return {"ok": True, "excluido": alvo["nome"]}
+
+
 POSTS = {"/api/import/pasta": importar_pasta, "/api/import/upload": importar_upload,
-         "/api/achados/status": mudar_status, "/api/varrer": rodar_varredura}
+         "/api/achados/status": mudar_status, "/api/varrer": rodar_varredura,
+         "/api/trabalhos/usar": trabalho_usar, "/api/trabalhos/novo": trabalho_novo,
+         "/api/trabalhos/excluir": trabalho_excluir}
 
 # Rotas que dispensam sessão. Todo o resto exige login.
 LIVRES = {"/login", "/login.html", "/app.css", "/app.js", "/favicon.ico",
@@ -343,6 +401,11 @@ ROUTES = {
         + (qs.get("data") or ["2022-12-31"])[0].replace("'", "") + "')")[0],
     "/api/datas": lambda qs: query(
         "select dt::text, movimentos, filiais from v_datas_movimento order by dt desc"),
+    "/api/trabalhos": lambda qs: query(
+        "select id, nome, cliente, exercicio, status, ativo, arquivos, notas, "
+        "       movimentos, achados_abertos, abertura, ufs, "
+        "       to_char(criado_em,'DD/MM/YYYY') as criado "
+        "from v_trabalho order by id"),
     "/api/inventario": lambda qs: query(sql_inventario(
         (qs.get("uf") or [""])[0],
         (qs.get("q") or [""])[0],

@@ -1,8 +1,8 @@
 # Manual do usuário — Fiscal Stock
 
-Este manual segue a ordem de um trabalho real: acessar, carregar, definir o
-ponto de partida e o critério, examinar, tratar os achados e emitir o papel de
-trabalho.
+Este manual segue a ordem de um trabalho real: acessar, escolher a auditoria,
+carregar, definir o ponto de partida e o critério, examinar, tratar os achados e
+emitir o papel de trabalho.
 
 ---
 
@@ -30,7 +30,68 @@ do navegador: **Ctrl+F5**.
 
 ---
 
-## 2. Carregar os arquivos
+## 2. Escolher o trabalho
+
+No alto de toda tela, ao lado do menu, aparece o **trabalho em uso**. Um
+trabalho é uma auditoria: um cliente, um exercício. Tudo o que você vê — o
+estoque, os achados, o relatório — é daquele trabalho e de mais nenhum.
+
+Clique no nome para abrir a lista. Ali você troca de auditoria, abre uma nova ou
+apaga uma antiga.
+
+### Começar uma auditoria nova
+
+Clique no trabalho em uso, preencha **nome**, **cliente** e **exercício** e
+confirme em *Criar e usar*. O sistema já leva você para a tela de importação,
+com o novo trabalho vazio esperando os arquivos.
+
+Não é preciso apagar nada para começar. O trabalho anterior fica onde está, com
+os arquivos, os movimentos, os achados e o histórico de cada um. Você volta a
+ele quando quiser, clicando em *Usar este*.
+
+Isso importa mais do que parece: se o cliente contestar um achado seis meses
+depois, você precisa poder abrir a auditoria daquela época exatamente como ela
+estava. Prova descartada é prova que nunca existiu.
+
+### Trocar de auditoria
+
+Na lista, *Usar este*. A página recarrega e todos os números passam a ser do
+trabalho escolhido.
+
+Uma consequência que vale ter em mente: **o mesmo arquivo pode ser importado em
+dois trabalhos diferentes**. Dentro de um trabalho o sistema continua recusando
+o arquivo repetido, pelo hash. Entre trabalhos, não — são auditorias distintas.
+
+### Apagar uma auditoria
+
+Na lista, *Excluir*. O sistema mostra o tamanho do que vai embora — arquivos,
+notas, movimentos, achados — e pede que você **digite o nome do trabalho**. Não
+é implicância: um "tem certeza?" não impede o clique errado, digitar o nome
+impede.
+
+Some tudo, sem desfazer. E o último trabalho não pode ser apagado — sem trabalho
+em uso, todas as telas ficariam em branco.
+
+### Materialidade do trabalho novo
+
+Um trabalho recém-criado nasce com os limiares **zerados**, o que significa que
+nenhum achado é descartado por ser pequeno. É de propósito: sem inventário
+carregado, o sistema não tem como saber o que é pequeno, e listar demais é o
+erro barato. Depois de importar e congelar o saldo de abertura, defina os
+limiares como descrito na seção 5.
+
+### Pela linha de comando
+
+```bash
+python -m auditoria trabalhos                 lista, com › no que está em uso
+python -m auditoria trabalho novo "ACME 2023" "ACME LTDA" 2023
+python -m auditoria trabalho usar 2
+python -m auditoria trabalho excluir 2
+```
+
+---
+
+## 3. Carregar os arquivos
 
 ### Conferir antes de importar
 
@@ -83,7 +144,7 @@ Dois cartões travam o trabalho se estiverem acima de zero:
 
 ---
 
-## 3. Definir o saldo de abertura
+## 4. Definir o saldo de abertura
 
 O saldo de abertura é o ponto zero do Kardex, e é **imutável**.
 
@@ -98,7 +159,7 @@ possível apagá-los enquanto o saldo de abertura os referenciar.
 
 ---
 
-## 4. Definir a materialidade
+## 5. Definir a materialidade
 
 Este passo é seu, não do sistema.
 
@@ -130,7 +191,7 @@ Os limiares constam do papel de trabalho.
 
 ---
 
-## 5. Examinar o estoque
+## 6. Examinar o estoque
 
 Tela **Estoque**. Escolha a data e o sistema apura a posição percorrendo os
 movimentos até ali, com custo médio ponderado móvel. Saídas baixam pelo custo
@@ -151,7 +212,7 @@ Cada filial tem cor própria — índigo para SP, teal para CE, magenta para SC.
 
 ---
 
-## 6. Levantar e tratar os achados
+## 7. Levantar e tratar os achados
 
 Tela **Achados**, ou pelo terminal.
 
@@ -224,7 +285,7 @@ O painel separa os dois, e a distinção importa:
 
 ---
 
-## 7. Emitir o papel de trabalho
+## 8. Emitir o papel de trabalho
 
 Tela **Relatório**. Escolha a data, clique em **Montar**.
 
@@ -240,7 +301,7 @@ direto, sem remontar colunas.
 
 ---
 
-## 8. Perguntas frequentes
+## 9. Perguntas frequentes
 
 **Preciso instalar alguma coisa?**
 Não, para o uso normal. Só para importar uma pasta inteira de arquivos, que
@@ -265,6 +326,16 @@ período foram importadas e se algum CFOP ficou sem classificação.
 Provavelmente já estava importado. O sistema identifica pelo conteúdo, não pelo
 nome: um arquivo renomeado continua sendo o mesmo. A tela mostra *já estava*.
 
+**Vou auditar outra empresa. Preciso apagar o que já está aqui?**
+Não. Abra um trabalho novo (seção 2) e importe os arquivos dela ali. As duas
+auditorias convivem, cada uma com os seus dados, e você alterna entre elas pelo
+seletor no alto da tela. Apagar só faz sentido quando a auditoria antiga já não
+tem valor nenhum como prova.
+
+**Importei os arquivos e o trabalho continua vazio.**
+Confira qual trabalho estava em uso na hora da importação — os dados entram no
+trabalho ativo. Troque para ele pelo seletor no alto da tela.
+
 **"Importar pasta" não funciona no site publicado.**
 Correto. Aquele servidor não tem acesso ao seu disco. Arraste os arquivos, ou
 use o servidor local para lotes grandes.
@@ -280,7 +351,7 @@ JavaScript em cache. **Ctrl+F5**.
 
 ---
 
-## 9. O que o sistema ainda não faz
+## 10. O que o sistema ainda não faz
 
 Saber o limite é parte do trabalho.
 

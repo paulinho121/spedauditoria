@@ -10,6 +10,11 @@ Linha de comando da auditoria.
   python -m auditoria varrer [data]       executa as regras e concilia os achados
   python -m auditoria achados [filtro]    lista os achados em aberto
   python -m auditoria materialidade       mostra ou define os limiares
+
+  python -m auditoria trabalhos           lista as auditorias e qual está em uso
+  python -m auditoria trabalho novo <nome> [cliente] [exercício]
+  python -m auditoria trabalho usar <id>
+  python -m auditoria trabalho excluir <id>
 """
 import glob
 import os
@@ -144,8 +149,10 @@ def cmd_congelar(args):
         print("  Saldo de abertura é imutável. Nada foi alterado.")
         return 0
 
+    # Grava na tabela física: ON CONFLICT não funciona sobre view, e desde a 028
+    # `saldo_abertura` é a view do trabalho ativo. O trabalho_id vem do DEFAULT.
     con.executa("""
-        insert into saldo_abertura
+        insert into saldo_abertura_todos
           (cnpj, data_base, cod_item, descr_item, unid, qtd, vl_unit, vl_item,
            ind_prop, cod_part, origem_item, congelado_por)
         select ii.cnpj, ii.dt_inv, ii.cod_item, si.descr_item, ii.unid, ii.qtd,
@@ -269,11 +276,110 @@ def cmd_materialidade(args):
     return 0
 
 
+def _trabalhos(con):
+    return con.consulta(
+        "select id, nome, cliente, exercicio, status, ativo, arquivos, notas, "
+        "       movimentos, achados_abertos, abertura, ufs "
+        "from v_trabalho order by id")
+
+
+def cmd_trabalhos(_):
+    """Lista as auditorias. A marcada com › é a que todo o resto enxerga."""
+    con = db.conecta()
+    ts = _trabalhos(con)
+    print("\nTrabalhos\n" + "-" * 78)
+    for t in ts:
+        marca = "›" if t["ativo"] else " "
+        print(f"  {marca} #{t['id']:<3} {t['nome'][:52]}")
+        detalhe = " · ".join(x for x in (t["cliente"], t["exercicio"], t["ufs"]) if x)
+        if detalhe:
+            print(f"      {detalhe}")
+        print(f"      {t['arquivos']} arquivos · {t['notas']} notas · "
+              f"{t['movimentos']} movimentos · {t['achados_abertos']} achados "
+              f"em aberto · abertura R$ {_fmt(t['abertura'])}")
+    print("\n  Para trocar:  python -m auditoria trabalho usar <id>")
+    return 0
+
+
+def cmd_trabalho(args):
+    """novo | usar | excluir. Sem argumento, cai na listagem."""
+    import getpass
+    con = db.conecta()
+    quem = os.environ.get("AUDITOR") or getpass.getuser()
+    acao = args[0] if args else ""
+
+    if acao == "novo":
+        if len(args) < 2:
+            print("  Informe o nome:  trabalho novo \"<nome>\" [cliente] [exercício]")
+            return 1
+        r = con.consulta("select * from trabalho_novo(%s, %s, %s, null, %s, true)",
+                         (args[1], args[2] if len(args) > 2 else None,
+                          args[3] if len(args) > 3 else None, quem))
+        t = r if isinstance(r, dict) else r[0]
+        print(f"\n  Trabalho #{t['id']} criado e em uso: {t['nome']}")
+        print("  Importe os EFDs e os XMLs deste cliente — nada se mistura com "
+              "os trabalhos anteriores.")
+        return 0
+
+    if acao == "usar":
+        if len(args) < 2:
+            print("  Informe o id:  trabalho usar <id>")
+            return 1
+        r = con.consulta("select * from trabalho_usar(%s, %s)", (int(args[1]), quem))
+        t = r if isinstance(r, dict) else r[0]
+        print(f"\n  Em uso: #{t['id']} {t['nome']}")
+        return 0
+
+    if acao == "excluir":
+        if len(args) < 2:
+            print("  Informe o id:  trabalho excluir <id>")
+            return 1
+        alvo = int(args[1])
+        ts = _trabalhos(con)
+        t = next((x for x in ts if x["id"] == alvo), None)
+        if t is None:
+            print(f"  Trabalho #{alvo} não existe.")
+            return 1
+        if len(ts) == 1:
+            print("  Este é o único trabalho. Crie outro antes de excluir este,\n"
+                  "  ou o sistema fica sem trabalho ativo.")
+            return 1
+
+        # Exclusão é definitiva e leva os dados por cascata. Mostro o tamanho do
+        # que vai embora e exijo o nome digitado — id se erra por um dígito.
+        print(f"\n  VAI APAGAR o trabalho #{t['id']}: {t['nome']}")
+        print(f"    {t['arquivos']} arquivos · {t['notas']} notas · "
+              f"{t['movimentos']} movimentos · {t['achados_abertos']} achados "
+              f"em aberto · abertura R$ {_fmt(t['abertura'])}")
+        print("    Some tudo: importações, movimentos, achados e o histórico "
+              "deles. Não há desfazer.")
+        try:
+            digitado = input(f"\n  Digite o nome do trabalho para confirmar: ").strip()
+        except EOFError:
+            print("  Sem terminal para confirmar. Nada foi apagado.")
+            return 1
+        if digitado != t["nome"]:
+            print("  O nome não confere. Nada foi apagado.")
+            return 1
+
+        con.executa("delete from trabalho where id = %s", (alvo,))
+        if t["ativo"]:
+            resto = [x for x in ts if x["id"] != alvo]
+            con.executa("select trabalho_usar(%s, %s)", (resto[0]["id"], quem))
+            print(f"  Excluído. Em uso agora: #{resto[0]['id']} {resto[0]['nome']}")
+        else:
+            print("  Excluído.")
+        return 0
+
+    return cmd_trabalhos(args)
+
+
 COMANDOS = {"varrer": cmd_varrer, "achados": cmd_achados,
             "materialidade": cmd_materialidade,
             "config": cmd_config, "migrar": cmd_migrar, "status": cmd_status,
             "importar": cmd_importar, "conferir": cmd_conferir,
-            "congelar": cmd_congelar, "ressalvas": cmd_ressalvas}
+            "congelar": cmd_congelar, "ressalvas": cmd_ressalvas,
+            "trabalhos": cmd_trabalhos, "trabalho": cmd_trabalho}
 
 
 def main(argv=None):

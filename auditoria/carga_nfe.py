@@ -161,14 +161,17 @@ def importa(caminho, quem=None, con=None, cache=None):
 
                 if not cod_item:
                     con.executa(
-                        "insert into item_pendente (cnpj, parceiro_doc, parceiro_nome, "
-                        " c_prod_externo, x_prod, ncm, u_com, ocorrencias, qtd_total, "
-                        " vl_total, primeira_chave) "
+                        # Tabela física, e o alvo reproduz ux_pendente tal como a
+                        # 027 a recriou — com trabalho_id e coalesce no parceiro.
+                        "insert into item_pendente_todos (cnpj, parceiro_doc, "
+                        " parceiro_nome, c_prod_externo, x_prod, ncm, u_com, "
+                        " ocorrencias, qtd_total, vl_total, primeira_chave) "
                         "values (%s,%s,%s,%s,%s,%s,%s,1,%s,%s,%s) "
-                        "on conflict (cnpj, parceiro_doc, c_prod_externo) do update set "
-                        " ocorrencias = item_pendente.ocorrencias + 1, "
-                        " qtd_total = coalesce(item_pendente.qtd_total,0) + excluded.qtd_total, "
-                        " vl_total = coalesce(item_pendente.vl_total,0) + excluded.vl_total",
+                        "on conflict (trabalho_id, cnpj, coalesce(parceiro_doc,''), "
+                        " c_prod_externo) do update set "
+                        " ocorrencias = item_pendente_todos.ocorrencias + 1, "
+                        " qtd_total = coalesce(item_pendente_todos.qtd_total,0) + excluded.qtd_total, "
+                        " vl_total = coalesce(item_pendente_todos.vl_total,0) + excluded.vl_total",
                         (cnpj, parceiro, d.emit_nome if sentido == "entrada" else d.dest_nome,
                          it.c_prod, it.x_prod, it.ncm, it.u_com, it.q_com, it.v_prod, d.chave))
                     pend += 1

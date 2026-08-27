@@ -66,8 +66,11 @@ def importa(caminho, quem=None):
 
     with con.transacao() as cur:
         cur.executa(
-            "insert into estabelecimento (cnpj, nome, uf, ie) values (%s,%s,%s,%s) "
-            "on conflict (cnpj) do update set nome = excluded.nome, "
+            # Tabela física e trabalho_id no alvo: `estabelecimento` virou view na
+            # 028, e a chave única ganhou trabalho_id na 027.
+            "insert into estabelecimento_todos (cnpj, nome, uf, ie) "
+            "values (%s,%s,%s,%s) "
+            "on conflict (trabalho_id, cnpj) do update set nome = excluded.nome, "
             "uf = excluded.uf, ie = excluded.ie",
             (efd.cnpj, efd.nome_empresa, efd.uf, efd.ie))
 

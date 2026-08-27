@@ -7,6 +7,17 @@ async function api(url) {
   return j;
 }
 
+async function apiPost(url, corpo) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(corpo || {})
+  });
+  const j = await r.json();
+  if (!r.ok || j.erro) throw new Error(j.erro || ('HTTP ' + r.status));
+  return j;
+}
+
 const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
 const nf2 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -64,6 +75,103 @@ function ligarSair() {
     await fetch('/api/auth/logout', { method: 'POST' });
     location.href = '/login';
   });
+}
+
+/* ------------------------------------------------------------ trabalhos
+ * Cada auditoria é um trabalho, e o painel inteiro mostra um por vez. O
+ * seletor fica no cabeçalho de todas as telas porque a pergunta "de qual
+ * cliente é este número?" vale em todas elas.
+ */
+
+/** Desenha o seletor no cabeçalho. Silencioso se o banco ainda não tem a
+ *  tabela: telas antigas continuam abrindo. */
+async function ligarTrabalhos() {
+  const alvo = document.querySelector('header.top .tabs');
+  if (!alvo) return;
+  let ts;
+  try { ts = await api('/api/trabalhos'); } catch (e) { return; }
+  if (!Array.isArray(ts) || !ts.length) return;
+
+  const atual = ts.find(t => t.ativo) || ts[0];
+  const cx = document.createElement('div');
+  cx.className = 'trab';
+  cx.innerHTML = `<button class="trab-botao" title="Trocar de auditoria">
+      <span class="trab-rot">Trabalho</span>
+      <span class="trab-nome">${esc(atual.nome)}</span>
+      <span class="trab-seta">▾</span>
+    </button>`;
+  alvo.parentNode.insertBefore(cx, alvo.nextSibling);
+  cx.querySelector('.trab-botao').onclick = () => painelTrabalhos(ts);
+}
+
+function painelTrabalhos(ts) {
+  const p = abrirPainel('Trabalhos',
+    'Cada trabalho é uma auditoria isolada. Os dados de um não aparecem no outro.');
+  const linhas = ts.map(t => `
+    <div class="trab-item${t.ativo ? ' on' : ''}">
+      <div class="trab-item-topo">
+        <strong>${esc(t.nome)}</strong>
+        ${t.ativo ? '<span class="chip">em uso</span>' : ''}
+      </div>
+      <div class="meta">${[t.cliente, t.exercicio, t.ufs].filter(Boolean).map(esc).join(' · ') || '—'}</div>
+      <div class="meta">${n(t.arquivos)} arquivos · ${n(t.notas)} notas ·
+        ${n(t.movimentos)} movimentos · ${n(t.achados_abertos)} achados em aberto ·
+        abertura ${money(t.abertura)}</div>
+      <div class="trab-acoes">
+        ${t.ativo ? '' : `<button data-usar="${t.id}">Usar este</button>`}
+        <button class="perigo" data-excluir="${t.id}">Excluir</button>
+      </div>
+    </div>`).join('');
+
+  p.corpo.innerHTML = `
+    ${linhas}
+    <div class="trab-novo">
+      <h3>Nova auditoria</h3>
+      <p class="meta">Começa vazia. Os arquivos que você importar depois ficam
+        só nela — nada se mistura com o que já está no sistema.</p>
+      <label>Nome <input id="tn-nome" maxlength="120" placeholder="Ex.: ACME — reconstrução 2023"></label>
+      <label>Cliente <input id="tn-cliente" maxlength="120"></label>
+      <label>Exercício <input id="tn-exercicio" maxlength="40" placeholder="2023"></label>
+      <button id="tn-criar" class="pri">Criar e usar</button>
+      <div id="tn-erro" class="erro-inline"></div>
+    </div>`;
+
+  const erro = m => { p.corpo.querySelector('#tn-erro').textContent = m; };
+
+  p.corpo.querySelectorAll('[data-usar]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await apiPost('/api/trabalhos/usar', { id: +b.dataset.usar }); location.reload(); }
+    catch (e) { b.disabled = false; erro(e.message); }
+  });
+
+  p.corpo.querySelectorAll('[data-excluir]').forEach(b => b.onclick = async () => {
+    const t = ts.find(x => x.id === +b.dataset.excluir);
+    // O nome digitado é a confirmação. Um "tem certeza?" não protege de
+    // engano — aqui o passo obriga a olhar de qual trabalho se trata.
+    const dito = prompt(
+      `Isto apaga o trabalho e tudo que está nele: ${n(t.arquivos)} arquivos, ` +
+      `${n(t.notas)} notas, ${n(t.movimentos)} movimentos e ${n(t.achados_abertos)} ` +
+      `achados. Não há como desfazer.\n\n` +
+      `Para confirmar, digite o nome do trabalho:\n${t.nome}`);
+    if (dito === null) return;
+    b.disabled = true;
+    try { await apiPost('/api/trabalhos/excluir', { id: t.id, confirma: dito }); location.reload(); }
+    catch (e) { b.disabled = false; erro(e.message); }
+  });
+
+  p.corpo.querySelector('#tn-criar').onclick = async ev => {
+    const nome = p.corpo.querySelector('#tn-nome').value.trim();
+    if (!nome) { erro('Dê um nome ao trabalho.'); return; }
+    ev.target.disabled = true;
+    try {
+      await apiPost('/api/trabalhos/novo', {
+        nome,
+        cliente: p.corpo.querySelector('#tn-cliente').value.trim(),
+        exercicio: p.corpo.querySelector('#tn-exercicio').value.trim()
+      });
+      location.href = '/importar';
+    } catch (e) { ev.target.disabled = false; erro(e.message); }
+  };
 }
 
 /** Cor de cada filial. Uma fonte só, para tabela, legenda e gráfico não

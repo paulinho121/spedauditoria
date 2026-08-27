@@ -241,6 +241,7 @@ ROTAS = {
     "/api/import/cfops": lambda qs: consulta_rest("v_cfop_nao_classificado"),
     "/api/import/notas": lambda qs: consulta_rest(
         "v_notas", {"order": "dt_emi.desc", "limit": 200}),
+    "/api/trabalhos": lambda qs: consulta_rest("v_trabalho", {"order": "id.asc"}),
 }
 
 
@@ -257,6 +258,95 @@ def chama_rpc(fn, payload, timeout=55):
     if codigo >= 400:
         raise Erro(f"{fn}: {str(dados)[:220]}")
     return dados if isinstance(dados, dict) else {}
+
+
+def chama_funcao(fn, args, timeout=30):
+    """
+    RPC com argumentos nomeados. chama_rpc manda sempre {"p": ...}, que serve
+    para importar_efd e importar_nfe; aqui os argumentos vão com o nome que a
+    função declara no banco.
+    """
+    if not (REF and SERVICE):
+        raise Erro("SUPABASE_SERVICE_KEY não configurada.")
+    codigo, dados = _http("POST", f"https://{REF}.supabase.co/rest/v1/rpc/{fn}",
+                          args, {"apikey": SERVICE,
+                                 "Authorization": f"Bearer {SERVICE}"},
+                          timeout=timeout, default=None)
+    if codigo >= 400:
+        raise Erro(f"{fn}: {str(dados)[:220]}")
+    return dados
+
+
+def _quem(u):
+    return (u or {}).get("email") or "painel"
+
+
+def post_trabalho_usar(corpo, u):
+    return um(chama_funcao("trabalho_usar",
+                           {"p_id": int((corpo or {}).get("id") or 0),
+                            "p_quem": _quem(u)}))
+
+
+def post_trabalho_novo(corpo, u):
+    nome = str((corpo or {}).get("nome") or "").strip()
+    if not nome:
+        return {"erro": "Dê um nome ao trabalho."}
+    return um(chama_funcao("trabalho_novo", {
+        "p_nome": nome[:120],
+        "p_cliente": (str((corpo or {}).get("cliente") or "").strip() or None),
+        "p_exercicio": (str((corpo or {}).get("exercicio") or "").strip() or None),
+        "p_descricao": (str((corpo or {}).get("descricao") or "").strip() or None),
+        "p_quem": _quem(u), "p_usar": True}))
+
+
+def post_trabalho_excluir(corpo, u):
+    """
+    Apagar leva os dados junto, por cascata. Duas travas: o nome tem de ser
+    digitado igual, e o último trabalho não sai — sem trabalho ativo todas as
+    telas ficariam em branco.
+    """
+    tid = int((corpo or {}).get("id") or 0)
+    ts = consulta_rest("v_trabalho", {"order": "id.asc"}) or []
+    alvo = next((t for t in ts if t["id"] == tid), None)
+    if alvo is None:
+        return {"erro": "Trabalho não encontrado."}
+    if len(ts) == 1:
+        return {"erro": "Este é o único trabalho. Crie outro antes de excluir este."}
+    if str((corpo or {}).get("confirma") or "").strip() != alvo["nome"]:
+        return {"erro": "O nome digitado não confere. Nada foi apagado."}
+    codigo, dados = _http(
+        "DELETE", f"https://{REF}.supabase.co/rest/v1/trabalho?id=eq.{tid}",
+        None, {"apikey": SERVICE, "Authorization": f"Bearer {SERVICE}"})
+    if codigo >= 400:
+        raise Erro(f"excluir: {str(dados)[:220]}")
+    if alvo["ativo"]:
+        resto = [t for t in ts if t["id"] != tid][0]
+        chama_funcao("trabalho_usar", {"p_id": resto["id"], "p_quem": _quem(u)})
+    return {"ok": True, "excluido": alvo["nome"]}
+
+
+def post_achado_status(corpo, u):
+    return um(chama_funcao("achado_mudar_status", {
+        "p_id": int((corpo or {}).get("id") or 0),
+        "p_status": str((corpo or {}).get("status") or ""),
+        "p_quem": _quem(u),
+        "p_nota": (corpo or {}).get("nota") or None}))
+
+
+def post_varrer(corpo, u):
+    return um(chama_funcao("varrer", {
+        "p_data": str((corpo or {}).get("data") or "2022-12-31"),
+        "p_quem": _quem(u)}, timeout=55))
+
+
+# POSTs que são só uma chamada de função no banco. Antes só o login e a
+# importação tinham tratamento aqui, e mudar o status de um achado ou rodar a
+# varredura caía em 404 no Vercel — funcionava apenas no servidor local.
+POSTS = {"/api/trabalhos/usar": post_trabalho_usar,
+         "/api/trabalhos/novo": post_trabalho_novo,
+         "/api/trabalhos/excluir": post_trabalho_excluir,
+         "/api/achados/status": post_achado_status,
+         "/api/varrer": post_varrer}
 
 
 def _sobe_auditoria():
@@ -411,6 +501,15 @@ def app(environ, start_response):
     if caminho in ROTAS:
         try:
             return responde("200 OK", json.dumps(ROTAS[caminho](qs), default=str))
+        except Erro as e:
+            return responde("500 Internal Server Error", json.dumps({"erro": str(e)}))
+        except Exception as e:
+            return responde("500 Internal Server Error",
+                            json.dumps({"erro": f"{type(e).__name__}: {e}"}))
+
+    if caminho in POSTS and metodo == "POST":
+        try:
+            return responde("200 OK", json.dumps(POSTS[caminho](corpo, u), default=str))
         except Erro as e:
             return responde("500 Internal Server Error", json.dumps({"erro": str(e)}))
         except Exception as e:

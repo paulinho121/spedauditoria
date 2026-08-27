@@ -29,6 +29,11 @@ marca como resolvidos os que sumiram. Nunca apaga.
 arquivos-fonte com SHA-256, metodologia e limitações. Imprime em PDF e exporta
 em CSV.
 
+**Guarda uma auditoria por trabalho.** Cada cliente, cada exercício, é um
+trabalho isolado: importações, movimentos, achados e histórico. Começar outra
+auditoria não custa apagar a anterior — e prova apagada é prova que nunca
+existiu, se o cliente contestar um achado seis meses depois.
+
 ### Famílias de achado
 
 | Tipo | Severidade | O que aponta |
@@ -84,6 +89,11 @@ python -m auditoria materialidade [p e t]     mostra ou define os limiares
 python -m auditoria varrer [data]             executa as regras e concilia achados
 python -m auditoria achados [filtro]          lista os achados em aberto
 python -m auditoria ressalvas                 limitações assumidas
+
+python -m auditoria trabalhos                 lista as auditorias e qual está em uso
+python -m auditoria trabalho novo <nome>      abre uma auditoria vazia e passa a usá-la
+python -m auditoria trabalho usar <id>        troca a auditoria em uso
+python -m auditoria trabalho excluir <id>     apaga uma auditoria e os dados dela
 ```
 
 Painel web:
@@ -124,7 +134,7 @@ auditoria/       pacote principal
   cli.py         linha de comando
 migrations/      SQL numerado, aplicado uma vez, hash conferido
 app/             painel local (servidor stdlib + HTML/CSS/JS sem dependências)
-api/             função serverless do Vercel — somente leitura
+api/             função serverless do Vercel
 tests/           testes do parser e golden files
 ```
 

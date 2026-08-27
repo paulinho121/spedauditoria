@@ -195,6 +195,55 @@ tbody tr.clicavel[data-uf="SC"]:hover td:first-child { box-shadow: inset 4px 0 0
 .painel-corpo { padding: var(--lg); }
 .painel-fechar { margin-left: auto; }
 
+/* ---------- seletor de trabalho ----------
+   Fica ao lado da navegação, em todas as telas: saber de qual auditoria é o
+   número que está na tela vale tanto no dashboard quanto no relatório. */
+.trab { margin-left: var(--sm); }
+.trab-botao {
+  display: flex; align-items: center; gap: 8px; max-width: 280px;
+  padding: 6px 12px; border-radius: var(--r-full);
+  background: var(--secondary-container); border-color: transparent;
+}
+.trab-rot {
+  font: 700 10px var(--sans); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--on-surface-variant);
+}
+.trab-nome {
+  font-size: 13px; font-weight: 600; color: var(--primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.trab-seta { color: var(--on-surface-variant); font-size: 11px; }
+
+.trab-item {
+  border: 1px solid var(--outline-variant); border-radius: var(--r-lg);
+  padding: 14px 16px; margin-bottom: 10px; background: var(--surface-lowest);
+}
+.trab-item.on { border-color: var(--primary); background: var(--secondary-container); }
+.trab-item-topo { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.trab-item .meta { font-size: 12.5px; color: var(--on-surface-variant); line-height: 1.6; }
+.trab-acoes { display: flex; gap: 8px; margin-top: 10px; }
+button.perigo { color: var(--error); border-color: var(--outline-variant); }
+button.perigo:hover { background: var(--error-container); border-color: var(--error); }
+
+.trab-novo {
+  margin-top: var(--lg); padding-top: var(--md);
+  border-top: 1px solid var(--outline-variant);
+}
+.trab-novo h3 { margin: 0 0 4px; font: 600 15px var(--head); color: var(--primary); }
+.trab-novo .meta { font-size: 13px; color: var(--on-surface-variant); margin: 0 0 12px; }
+.trab-novo label {
+  display: block; margin-bottom: 10px; max-width: 420px;
+  font-size: 12px; font-weight: 600; color: var(--on-surface-variant);
+}
+.trab-novo input {
+  display: block; width: 100%; margin-top: 4px; padding: 8px 10px;
+  font: inherit; color: var(--on-surface);
+  border: 1px solid var(--outline-variant); border-radius: var(--r-md);
+  background: var(--surface-lowest);
+}
+.trab-novo input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.erro-inline { margin-top: 10px; font-size: 13px; color: var(--error); font-weight: 600; }
+
 .card.clicavel { cursor: pointer; }
 .card.clicavel:hover { border-color: var(--primary); }
 .card.clicavel .foot::after { content: " ›"; font-weight: 700; }
