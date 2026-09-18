@@ -290,9 +290,19 @@ A remessa em locação leva o valor do **equipamento**, não do aluguel. A
 receita do aluguel e a de serviços saem em NFS-e, que o sistema ainda não lê —
 por isso não estão no número.
 
-O valor é o das mercadorias, líquido de desconto, linha a linha pelo CFOP. Na
-lista de notas, o total de cada nota (com impostos e frete) aparece ao lado,
-para conferência. Só entram notas autorizadas.
+São duas medidas, lado a lado:
+
+| Medida | O que soma | Para que serve |
+|---|---|---|
+| **Faturamento total** | a nota inteira (vNF): mercadoria, frete, seguro, outras despesas, IPI e ICMS-ST | é o número do ERP |
+| **Receita bruta** | mercadoria, frete, seguro e outras despesas, menos desconto — **sem** IPI e ICMS-ST | é a base de PIS, COFINS, IRPJ e CSLL |
+
+IPI e ICMS-ST são cobrados do cliente por conta do fisco: entram no que foi
+faturado, mas não são receita. A diferença entre as duas medidas é,
+essencialmente, o IPI — a empresa é importadora e destaca IPI na revenda.
+
+Em julho/2026, o faturamento total de SP bate com o ERP no centavo
+(R$ 741.643,84). Só entram notas autorizadas.
 
 ### Quando o mês aparece só com saídas
 

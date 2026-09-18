@@ -82,13 +82,17 @@ td.neg { color: var(--error); font-variant-numeric: tabular-nums; }
   <div class="wrap" style="margin-top:12px">
     <table id="tbl-fat">
       <thead><tr><th>Operação</th><th>CFOP</th><th class="desc">Descrição</th>
-        <th class="num">Notas</th><th class="num">Valor</th><th>Entra no faturamento?</th></tr></thead>
-      <tbody><tr><td colspan="6" class="skel">carregando…</td></tr></tbody>
+        <th class="num">Notas</th><th class="num">Total das notas</th><th class="num">Receita bruta</th>
+        <th>Entra no faturamento?</th></tr></thead>
+      <tbody><tr><td colspan="7" class="skel">carregando…</td></tr></tbody>
     </table>
   </div>
   <p class="muted" style="font-size:12.5px;margin:10px 0 24px;line-height:1.6">
-    Valor das mercadorias líquido de desconto, linha a linha pelo CFOP, só de
-    notas autorizadas. <b>Entrega futura</b> conta na remessa (5117/6117), quando
+    <b>Total das notas</b> é o valor cobrado do cliente, com IPI e ICMS-ST — é o
+    número que o ERP mostra. <b>Receita bruta</b> é a base dos tributos federais:
+    mercadoria, frete, seguro e outras despesas cobradas, menos desconto, sem o
+    IPI e o ICMS-ST. Linha a linha pelo CFOP, só de notas autorizadas.
+    <b>Entrega futura</b> conta na remessa (5117/6117), quando
     a mercadoria sai; o faturamento antecipado (5922/6922) aparece a parte para
     não contar a mesma venda duas vezes. <b>Remessa em locação ou comodato</b>
     (5908/6908) leva o valor do equipamento, não o do aluguel, e por isso não
@@ -308,18 +312,28 @@ async function carregarFaturamento(mes, uf) {
   let rows;
   try { rows = await api('/api/periodo/faturamento?' + q); } catch (e) { return falha(e); }
 
-  const soma = s => rows.filter(r => +r.sinal === s)
-                        .reduce((a, r) => a + +r.valor, 0);
+  // Duas medidas. TOTAL FATURADO é a nota inteira (vNF), com IPI e ICMS-ST — é
+  // o número do ERP. RECEITA BRUTA é a base de PIS, COFINS, IRPJ e CSLL: sem o
+  // IPI e o ICMS-ST, que são cobrados do cliente por conta do fisco.
+  const soma = (s, campo) => rows.filter(r => +r.sinal === s)
+                                 .reduce((a, r) => a + +r[campo], 0);
   const notasDe = s => rows.filter(r => +r.sinal === s)
                            .reduce((a, r) => a + +r.notas, 0);
-  const vendas = soma(1), devol = soma(-1), fora = soma(0);
+  const totLiq = soma(1, 'valor_total') - soma(-1, 'valor_total');
+  const recLiq = soma(1, 'valor') - soma(-1, 'valor');
+  const ipi = soma(1, 'ipi') - soma(-1, 'ipi');
+  const st = soma(1, 'st') - soma(-1, 'st');
+  const devol = soma(-1, 'valor_total'), fora = soma(0, 'valor_total');
 
   $('fat-kpis').innerHTML = `
     <div class="card good clicavel" id="fat-abrir" role="button" tabindex="0">
-      <div class="lbl">Faturamento líquido</div>
-      <div class="val">${money(vendas - devol)}</div>
-      <div class="foot">ver as notas que compõem</div></div>
-    ${card('Vendas', money(vendas), `${n(notasDe(1))} nota(s) de venda`)}
+      <div class="lbl">Faturamento total</div>
+      <div class="val">${money(totLiq)}</div>
+      <div class="foot">total das notas, como no ERP · ver as notas</div></div>
+    ${card('Receita bruta', money(recLiq),
+           'base de PIS, COFINS, IRPJ e CSLL — sem IPI e ICMS-ST')}
+    ${card('IPI e ICMS-ST nas notas', money(ipi + st),
+           `IPI ${money(ipi)} · ST ${money(st)} — cobrados do cliente, não são receita`)}
     ${card('Devoluções de venda', money(devol),
            devol ? `${n(notasDe(-1))} nota(s) — já descontadas` : 'nenhuma no período')}
     ${card('Fora do faturamento', money(fora),
@@ -333,18 +347,19 @@ async function carregarFaturamento(mes, uf) {
     <td class="mono">${esc(r.cfop)}</td>
     <td class="desc">${esc(r.descricao)}</td>
     <td class="num">${n(r.notas)}</td>
-    <td class="num"><b>${money(r.valor)}</b></td>
+    <td class="num"><b>${money(r.valor_total)}</b></td>
+    <td class="num">${money(r.valor)}</td>
     <td>${+r.sinal === 1 ? '<span class="chip ok">soma</span>'
         : +r.sinal === -1 ? '<span class="chip err">subtrai</span>'
         : '<span class="chip warn">não — informativo</span>'}</td>`,
     rows.length ? `<tfoot><tr><td colspan="4">Faturamento líquido</td>
-      <td class="num">${money(vendas - devol)}</td><td></td></tr></tfoot>` : '');
+      <td class="num">${money(totLiq)}</td><td class="num">${money(recLiq)}</td><td></td></tr></tfoot>` : '');
 }
 
 async function abrirNotasFaturamento(mes, uf) {
   const p = abrirPainel('Notas que compõem o faturamento',
     `${uf ? 'Filial ' + uf : 'Grupo consolidado'} · ${rotuloMes(mes)} · ` +
-    'valor das mercadorias líquido de desconto; o total da nota inclui impostos e frete');
+    'total faturado com IPI e ICMS-ST, como no ERP; receita bruta sem eles');
   let notas;
   try {
     notas = await api(`/api/periodo/faturamento/notas?mes=${mes}&uf=${encodeURIComponent(uf)}`);
@@ -352,11 +367,12 @@ async function abrirNotasFaturamento(mes, uf) {
     p.corpo.innerHTML = `<div class="err-box">Não consegui carregar as notas.<br>${esc(e.message)}</div>`;
     return;
   }
-  const liq = notas.reduce((a, x) => a + (+x.sinal) * (+x.valor), 0);
+  const liq = notas.reduce((a, x) => a + (+x.sinal) * (+x.valor_total), 0);
+  const rec = notas.reduce((a, x) => a + (+x.sinal) * (+x.valor), 0);
   p.corpo.innerHTML = `
     <div class="wrap"><table>
       <thead><tr><th>Data</th><th>NF</th><th class="desc">Cliente</th><th>CFOP</th>
-        <th>Operação</th><th class="num">Valor faturado</th><th class="num">Total da nota</th></tr></thead>
+        <th>Operação</th><th class="num">Total faturado</th><th class="num">Receita bruta</th></tr></thead>
       <tbody>${notas.map(x => `<tr>
         <td class="mono">${brDate(x.dt_emi)}</td>
         <td class="mono">${esc(x.num_nf)}</td>
@@ -366,11 +382,12 @@ async function abrirNotasFaturamento(mes, uf) {
              ? '<span class="chip err">devolução</span>'
              : '<span class="chip warn">não soma</span>'}
             <span class="muted" style="font-size:12px">${esc(GRUPO_FAT[x.grupo] || x.grupo)}</span></td>
+        <td class="num">${+x.sinal === 0 ? '<span class="muted">' + money(x.valor_total) + '</span>'
+             : (+x.sinal < 0 ? '−' : '') + money(x.valor_total)}</td>
         <td class="num">${+x.sinal === 0 ? '<span class="muted">' + money(x.valor) + '</span>'
-             : (+x.sinal < 0 ? '−' : '') + money(x.valor)}</td>
-        <td class="num muted">${money(x.vl_nf)}</td></tr>`).join('')}</tbody>
+             : (+x.sinal < 0 ? '−' : '') + money(x.valor)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="5">Faturamento líquido · ${n(notas.filter(x => +x.sinal !== 0).length)} nota(s)</td>
-        <td class="num">${money(liq)}</td><td></td></tr></tfoot>
+        <td class="num">${money(liq)}</td><td class="num">${money(rec)}</td></tr></tfoot>
     </table></div>`;
 }
 
