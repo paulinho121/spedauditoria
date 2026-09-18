@@ -228,6 +228,19 @@ def rota_periodo(qs):
     return linhas
 
 
+def _faturamento_params(qs):
+    ini, fim = _mes(qs)
+    # Sem p_cnpj a funcao usa o padrao (null = grupo consolidado). Mandar None
+    # viraria o texto "None" na URL.
+    p = {"p_ini": ini, "p_fim": fim}
+    uf = (qs.get("uf") or [""])[0]
+    if uf in ("SP", "CE", "SC"):
+        e = consulta_rest("estabelecimento", {"uf": f"eq.{uf}", "select": "cnpj"})
+        if e:
+            p["p_cnpj"] = e[0]["cnpj"]
+    return p
+
+
 def rota_inventario(qs):
     limite = min(int((qs.get("limit") or ["60"])[0]), 500)
     offset = int((qs.get("offset") or ["0"])[0])
@@ -309,6 +322,10 @@ ROTAS = {
     "/api/periodo": rota_periodo,
     "/api/periodo/resumo": lambda qs: um(consulta_rest(
         "rpc/estoque_periodo_resumo", _periodo_params(qs))),
+    "/api/periodo/faturamento": lambda qs: consulta_rest(
+        "rpc/faturamento_periodo", _faturamento_params(qs)),
+    "/api/periodo/faturamento/notas": lambda qs: consulta_rest(
+        "rpc/faturamento_notas", _faturamento_params(qs)),
     "/api/periodo/bloqueios": lambda qs: consulta_rest(
         "rpc/periodo_bloqueios",
         dict(zip(("p_ini", "p_fim"), _mes(qs)))),

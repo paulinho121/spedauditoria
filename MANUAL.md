@@ -268,6 +268,32 @@ explica um saldo negativo.
 
 Nada desta tela alimenta o motor de achados, justamente por isso.
 
+### Faturamento do mês
+
+No topo da tela Mês aparece o faturamento da filial escolhida no seletor — ou
+do grupo, sem as notas entre filiais, quando nenhuma está escolhida. Clique no
+cartão *Faturamento líquido* para ver cada nota que compõe o número.
+
+| Operação | Entra? |
+|---|---|
+| Venda de mercadoria (com e sem ST, a não contribuinte, exportação) | soma |
+| Devolução de venda — emitida pela filial ou pelo cliente | subtrai |
+| Entrega futura: remessa (5117/6117) | soma |
+| Entrega futura: faturamento antecipado (5922/6922) | não soma — aparece a parte |
+| Remessa em locação ou comodato (5908/6908) | não soma — aparece a parte |
+| Transferência, remessa, retorno, conserto | não é faturamento |
+
+A venda para entrega futura gera duas notas com o mesmo valor. Conta a
+remessa, quando a mercadoria sai; somar as duas contaria a venda duas vezes.
+
+A remessa em locação leva o valor do **equipamento**, não do aluguel. A
+receita do aluguel e a de serviços saem em NFS-e, que o sistema ainda não lê —
+por isso não estão no número.
+
+O valor é o das mercadorias, líquido de desconto, linha a linha pelo CFOP. Na
+lista de notas, o total de cada nota (com impostos e frete) aparece ao lado,
+para conferência. Só entram notas autorizadas.
+
 ### Quando o mês aparece só com saídas
 
 Quase nunca é o sistema errando: é nota que foi importada e **não chegou ao

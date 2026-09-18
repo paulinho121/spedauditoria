@@ -182,6 +182,17 @@ def sql_periodo(mes, uf, termo, limit, offset, ordem, situacao="", origem="nfe")
             f"limit {int(limit)} offset {int(offset)}")
 
 
+def _cnpj_da_uf(uf):
+    """Filial escolhida na tela. Sem filial, o grupo consolidado (null)."""
+    return (f"(select cnpj from estabelecimento where uf = '{uf}' limit 1)"
+            if uf in ("SP", "CE", "SC") else "null")
+
+
+def sql_faturamento(mes, uf, funcao="faturamento_periodo"):
+    ini, fim = _mes(mes, "2023-01")
+    return f"select * from {funcao}({ini}, {fim}, {_cnpj_da_uf(uf)})"
+
+
 def sql_periodo_bloqueios(mes):
     ini, fim = _mes(mes, "2023-01")
     return f"select * from periodo_bloqueios({ini}, {fim})"
@@ -465,6 +476,10 @@ ROUTES = {
         (qs.get("origem") or ["nfe"])[0])),
     "/api/periodo/resumo": lambda qs: query(sql_periodo_resumo(
         (qs.get("mes") or [""])[0], (qs.get("origem") or ["nfe"])[0]))[0],
+    "/api/periodo/faturamento": lambda qs: query(sql_faturamento(
+        (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0])),
+    "/api/periodo/faturamento/notas": lambda qs: query(sql_faturamento(
+        (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0], "faturamento_notas")),
     "/api/periodo/bloqueios": lambda qs: query(
         sql_periodo_bloqueios((qs.get("mes") or [""])[0])),
     "/api/periodo/meses": lambda qs: query(
