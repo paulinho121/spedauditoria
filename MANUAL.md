@@ -245,16 +245,38 @@ Quase nunca é o sistema errando: é nota que foi importada e **não chegou ao
 estoque**. O painel *Notas do mês que não chegaram ao estoque* mostra quantas
 linhas pararam e por quê:
 
-| Motivo | O que significa | Onde resolver |
-|---|---|---|
-| **Item sem correspondência** | O código do produto na nota é do fornecedor e ainda não foi ligado a um item seu | Importar |
-| **CFOP sem classificação** | O sistema não sabe o efeito daquele CFOP no estoque | Importar |
-| **Nota não autorizada** | Cancelada ou denegada — não existe para o estoque | nada a fazer |
-| **Nenhum estabelecimento auditado é parte** | A nota não envolve nenhum CNPJ do trabalho | nada a fazer |
+| Motivo | O que significa |
+|---|---|
+| **Item sem correspondência** | O código do produto na nota é do fornecedor e ainda não foi ligado a um item seu |
+| **CFOP sem classificação** | O sistema não sabe o efeito daquele CFOP no estoque |
+| **Nota não autorizada** | Cancelada ou denegada — não existe para o estoque |
 
-As duas primeiras dependem só de você, e o valor delas aparece no painel.
-Resolvidas na tela Importar, o saldo se refaz sozinho — não é preciso
-reimportar nada.
+As duas primeiras dependem de uma decisão sua, e o valor delas aparece no
+painel. A tela Importar lista os itens sem correspondência e sugere candidatos
+do cadastro, mas **ainda não tem como confirmar o de-para** — isso está por
+fazer.
+
+### Transferência entre filiais
+
+Uma nota de transferência gera dois lançamentos: a **saída** em quem emitiu e a
+**entrada** em quem recebeu. O CFOP da nota é o do emitente (6152 é
+"transferência de saída"); para quem recebe, o sistema aplica o efeito
+espelhado — o que saiu de uma filial entrou na outra.
+
+O código do produto é aceito automaticamente de uma filial para a outra, porque
+o grupo usa o mesmo cadastro na maior parte dos itens. A exceção é quando o
+mesmo código é **produto diferente** em cada filial — acontece: o 4083 é tubo de
+LED em SC e luminária em SP. O sistema compara as descrições e, se não
+conferem, manda o item para o de-para manual em vez de somar um produto na
+conta do outro.
+
+Cada casamento automático fica registrado com o motivo — "código novo no
+destino" ou "descrição confere", com o grau de semelhança — para poder ser
+revisto.
+
+Remessa entre filiais (conserto, demonstração, armazém) não gera entrada no
+destino: a mercadoria troca de mão sem trocar de dono, e a saída já registra a
+mudança de posse.
 
 O sistema recusa gerar o movimento nesses casos de propósito. Um Kardex com
 furo visível é auditável; um com número adivinhado, não.

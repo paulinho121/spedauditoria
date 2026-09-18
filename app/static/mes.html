@@ -193,10 +193,13 @@ async function carregar() {
       `<b>${n(linhasBloq)} linhas de nota</b> deste mês foram importadas mas não ` +
       `geraram movimento, então não estão no saldo abaixo.` +
       (tratavel.length
-        ? ` <b>${money(valorBloq)}</b> disso depende só de você — o sistema não ` +
-          `adivinha o que não foi dito, e preferir o furo visível a um número ` +
-          `inventado é proposital. Resolva na tela <a href="/importar">Importar</a> ` +
-          `e o saldo se refaz sozinho.`
+        ? ` <b>${money(valorBloq)}</b> disso depende de uma decisão que o sistema ` +
+          `não toma sozinho: ligar o código do fornecedor a um item seu, ou dizer ` +
+          `o que um CFOP faz com o estoque. Preferir o furo visível a um número ` +
+          `inventado é proposital. Transferência entre as suas filiais já é casada ` +
+          `automaticamente, salvo quando o mesmo código é produto diferente em ` +
+          `cada uma. A tela <a href="/importar">Importar</a> lista os itens e sugere ` +
+          `candidatos, mas <b>ainda não tem como confirmar o de-para</b>.`
         : '');
     fill('tbl-bloq', bloq, b => `
       <td>${esc(MOTIVO[b.motivo] || b.motivo)}</td>

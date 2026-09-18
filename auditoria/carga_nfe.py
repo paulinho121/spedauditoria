@@ -48,11 +48,6 @@ def _cfop_efeitos(con):
     return {r["cfop"]: r for r in con.consulta("select * from cfop_efeito")}
 
 
-def _depara(con, cnpj):
-    return {(r["parceiro_doc"] or "", r["c_prod_externo"]): r
-            for r in con.consulta("select * from item_depara where cnpj = %s", (cnpj,))}
-
-
 def _codigos_proprios(con, cnpj):
     return {r["cod_item"] for r in con.consulta(
         "select distinct cod_item from sped_item where cnpj_estab = %s", (cnpj,))}
@@ -75,7 +70,6 @@ def importa(caminho, quem=None, con=None, cache=None):
     if "cnpjs" not in cache:
         cache["cnpjs"] = nossos_cnpjs(con)
         cache["cfop"] = _cfop_efeitos(con)
-        cache["depara"] = {}
         cache["proprios"] = {}
     nossos = cache["cnpjs"]
 
@@ -124,14 +118,18 @@ def importa(caminho, quem=None, con=None, cache=None):
         return ResultadoNFe(nome, "importada_sem_movimento", d.chave, nfe_id,
                             avisos=avisos + [f"situação {d.situacao}: não gera movimento"])
 
-    movs = pend = 0
+    movs = pend = auto = 0
     for cnpj in envolvidos:
         for sentido in d.sentido_para(cnpj):
-            parceiro = d.dest_doc if sentido == "saida" else d.emit_cnpj
-            if cnpj not in cache["depara"]:
-                cache["depara"][cnpj] = _depara(con, cnpj)
+            # O lado de quem RECEBE não é tratado aqui: vive no banco, em
+            # gerar_movimento_destino(), chamada logo abaixo. O importador pelo
+            # banco (Vercel, linha de comando) chama a mesma função — com a
+            # lógica duplicada nos dois, uma correção feita num lado só faria os
+            # dois caminhos darem estoques diferentes para a mesma nota.
+            if sentido != "saida":
+                continue
+            if cnpj not in cache["proprios"]:
                 cache["proprios"][cnpj] = _codigos_proprios(con, cnpj)
-            depara = cache["depara"][cnpj]
             proprios = cache["proprios"][cnpj]
 
             for it in d.itens:
@@ -141,41 +139,14 @@ def importa(caminho, quem=None, con=None, cache=None):
                                   f"não gerou movimento")
                     continue
 
-                cod_item, fator = None, 1
-                if sentido == "saida":
-                    # Nota emitida por nós: o cProd É o nosso código, por definição.
-                    # Não exigir presença no cadastro 0200 do momento zero — o
-                    # cadastro evolui, e um item criado depois de 31/12/2022 seria
-                    # rejeitado indevidamente.
-                    cod_item = it.c_prod
-                    if it.c_prod not in proprios:
-                        avisos.append(f"item {it.n_item}: código {it.c_prod} não existe "
-                                      f"no cadastro de {cnpj} do momento zero (item novo)")
-                else:
-                    # Entrada: o cProd é de quem emitiu. Mesmo vindo de filial nossa,
-                    # os códigos colidem entre estabelecimentos e exigem de-para.
-                    achado = depara.get((parceiro or "", it.c_prod)) or \
-                             depara.get(("", it.c_prod))
-                    if achado:
-                        cod_item, fator = achado["cod_item"], float(achado["fator_unidade"])
-
-                if not cod_item:
-                    con.executa(
-                        # Tabela física, e o alvo reproduz ux_pendente tal como a
-                        # 027 a recriou — com trabalho_id e coalesce no parceiro.
-                        "insert into item_pendente_todos (cnpj, parceiro_doc, "
-                        " parceiro_nome, c_prod_externo, x_prod, ncm, u_com, "
-                        " ocorrencias, qtd_total, vl_total, primeira_chave) "
-                        "values (%s,%s,%s,%s,%s,%s,%s,1,%s,%s,%s) "
-                        "on conflict (trabalho_id, cnpj, coalesce(parceiro_doc,''), "
-                        " c_prod_externo) do update set "
-                        " ocorrencias = item_pendente_todos.ocorrencias + 1, "
-                        " qtd_total = coalesce(item_pendente_todos.qtd_total,0) + excluded.qtd_total, "
-                        " vl_total = coalesce(item_pendente_todos.vl_total,0) + excluded.vl_total",
-                        (cnpj, parceiro, d.emit_nome if sentido == "entrada" else d.dest_nome,
-                         it.c_prod, it.x_prod, it.ncm, it.u_com, it.q_com, it.v_prod, d.chave))
-                    pend += 1
-                    continue
+                # Nota emitida por nós: o cProd É o nosso código, por definição.
+                # Não exigir presença no cadastro 0200 do momento zero — o
+                # cadastro evolui, e um item criado depois de 31/12/2022 seria
+                # rejeitado indevidamente.
+                cod_item, fator = it.c_prod, 1
+                if it.c_prod not in proprios:
+                    avisos.append(f"item {it.n_item}: código {it.c_prod} não existe "
+                                  f"no cadastro de {cnpj} do momento zero (item novo)")
 
                 qtd = float(it.q_com or 0) * fator
                 if qtd <= 0:
@@ -204,6 +175,16 @@ def importa(caminho, quem=None, con=None, cache=None):
                          it.n_item, it.cfop, e, q, vu, abs(q) * vu, prop,
                          f"{sentido} · {efeito['descricao'][:60]}"))
                     movs += 1
+
+    # Lado do destino, com o efeito espelhado e o de-para de transferência.
+    r = con.consulta("select * from gerar_movimento_destino(%s, true)", (nfe_id,))
+    r = r[0] if isinstance(r, list) and r else (r or {})
+    movs += int(r.get("movimentos") or 0)
+    pend += int(r.get("pendencias") or 0)
+    auto = int(r.get("automaticos") or 0)
+    if auto:
+        avisos.append(f"{auto} item(ns) de transferência interna casado(s) pelo "
+                      f"código do emitente — de-para automático, revisável")
 
     return ResultadoNFe(nome, "importada", d.chave, nfe_id, movs, pend, avisos)
 
