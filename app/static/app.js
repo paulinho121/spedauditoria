@@ -85,6 +85,7 @@ function ligarSair() {
 const NAT = {
   abertura: 'abertura', transferencia: 'transferência', posse: 'muda de posse',
   entrada: 'entrada', saida: 'saída', simbolico: 'simbólico',
+  terceiro: 'bem de terceiro',
 };
 
 function cardF(lbl, val, cls) {
@@ -169,7 +170,9 @@ async function abrirFicha(item, ate, nota) {
       <br><b>Transferência</b> é movimento entre filiais do próprio grupo, e a
       sigla mostra qual. <b>Muda de posse</b> não altera o patrimônio: a
       mercadoria sai do seu poder e continua sendo sua — é o caso da remessa
-      para armazém geral e da remessa em locação.
+      para armazém geral e da remessa em locação. <b>Bem de terceiro</b> é o
+      equipamento do cliente recebido para conserto e devolvido a ele: entra e
+      sai da sua guarda sem nunca entrar no seu saldo.
     </p>`;
 }
 

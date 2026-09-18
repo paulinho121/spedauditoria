@@ -283,3 +283,4 @@ td.ent:empty::before, td.sai:empty::before { content: ""; }
 .nat-entrada       { background: #d9f0e9; color: #0b6b57; }
 .nat-saida         { background: #fbe6d8; color: #a8480f; }
 .nat-simbolico     { background: var(--surface-low); color: var(--on-surface-variant); }
+.nat-terceiro      { background: #efe7f8; color: #5b2d8a; }

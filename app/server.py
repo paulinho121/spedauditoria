@@ -555,6 +555,10 @@ ROUTES = {
         (qs.get("origem") or ["nfe"])[0])),
     "/api/periodo/resumo": lambda qs: query(sql_periodo_resumo(
         (qs.get("mes") or [""])[0], (qs.get("origem") or ["nfe"])[0]))[0],
+    "/api/estoque/de-terceiros": lambda qs: query(
+        "select * from estoque_de_terceiros(date '%s')"
+        % (lambda d: d if re.match(r"^\d{4}-\d{2}-\d{2}$", d) else "2026-12-31")(
+            (qs.get("data") or [""])[0])),
     "/api/resultado": resultado,
     "/api/apuracao": apuracao,
     "/api/apuracao/consistencia": apuracao_consistencia,

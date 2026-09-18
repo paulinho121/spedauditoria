@@ -87,6 +87,7 @@ input[type=date]:focus { outline: none; border-color: var(--primary);
   </div>
 
   <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
+  <div id="terceiros" style="margin-top:12px"></div>
 
   <div class="wrap" style="margin-top:16px">
     <table id="tbl">
@@ -121,6 +122,45 @@ function params() {
   });
 }
 
+/**
+ * Bens de terceiros em seu poder na data — o IND_PROP 2 do Bloco H. Ficam fora
+ * do estoque acima: são do cliente, recebidos para conserto. Saldo negativo é
+ * retorno sem entrada no sistema: falta a nota de entrada, ou o de-para.
+ */
+async function bensDeTerceiros(data) {
+  const cx = $('terceiros');
+  let t;
+  try { t = await api('/api/estoque/de-terceiros?data=' + data); } catch (e) { cx.innerHTML = ''; return; }
+  if (!t.length) { cx.innerHTML = ''; return; }
+  const neg = t.filter(x => +x.qtd < 0);
+  cx.innerHTML = `<div class="card clicavel ${neg.length ? 'alert' : ''}" id="ver-terceiros" role="button" tabindex="0">
+      <div class="lbl">Bens de terceiros em seu poder</div>
+      <div class="val sm">${n(t.filter(x => +x.qtd > 0).length)} item(ns) · ${money(t.filter(x => +x.qtd > 0).reduce((a, x) => a + +x.valor_nota, 0))}</div>
+      <div class="foot">${neg.length ? `${neg.length} retorno(s) sem entrada no sistema — ver` : 'equipamento de cliente em conserto · fora do estoque acima · ver'}</div></div>`;
+  const abre = () => {
+    const p = abrirPainel('Bens de terceiros em seu poder',
+      `Posição em ${brDate(data)} · IND_PROP 2 do Bloco H · não somam no estoque próprio`);
+    p.corpo.innerHTML = `
+      <div class="motivo">Equipamento do cliente recebido para conserto (2915, ou a 6915
+        do próprio cliente) e ainda não devolvido (6916). <b>Negativo</b> é devolução
+        sem a entrada correspondente no sistema: a nota de entrada não foi importada,
+        ou está com o código do cliente esperando o de-para.</div>
+      <div class="wrap"><table>
+        <thead><tr><th>UF</th><th>Código</th><th class="desc">Descrição</th><th class="desc">Dono</th>
+          <th class="num">Qtd</th><th class="num">Valor na nota</th><th>Última NF</th></tr></thead>
+        <tbody>${t.map(x => `<tr>
+          <td>${chipUF(x.uf)}</td><td class="mono">${esc(x.cod_item)}</td>
+          <td class="desc">${esc(x.descr_item || '—')}</td>
+          <td class="desc">${esc(x.dono_nome || x.dono_doc || '—')}</td>
+          <td class="num">${+x.qtd < 0 ? `<span class="chip err">${n(x.qtd)}</span>` : n(x.qtd)}</td>
+          <td class="num">${money(x.valor_nota)}</td>
+          <td class="mono">${esc(x.ultima_nf || '')}</td></tr>`).join('')}</tbody>
+      </table></div>`;
+  };
+  $('ver-terceiros').onclick = abre;
+  $('ver-terceiros').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abre(); } };
+}
+
 async function carregar() {
   const data = $('data').value;
   if (!data) return;
@@ -151,6 +191,7 @@ async function carregar() {
   ].join('');
 
   ligarCardNegativos();
+  bensDeTerceiros(data);
   document.getElementById('nota-neg').hidden = ativo !== 'negativo';
 
   const total = linhas.length ? +linhas[0].total_geral : 0;

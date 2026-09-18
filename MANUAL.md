@@ -360,6 +360,26 @@ Remessa entre filiais (conserto, demonstração, armazém) não gera entrada no
 destino: a mercadoria troca de mão sem trocar de dono, e a saída já registra a
 mudança de posse.
 
+### Equipamento de cliente em conserto
+
+O equipamento que o cliente manda para conserto **é dele**, e não entra no seu
+estoque. Mas precisa ser acompanhado: o inventário do Bloco H declara, com
+indicador de propriedade 2, os bens de terceiros em poder da empresa.
+
+| Nota | Efeito |
+|---|---|
+| 2915 / 1915 — entrada que a empresa emite (cliente pessoa física) | bem de terceiro **entra** na sua guarda |
+| 6915 / 5915 recebida — o cliente empresa manda com nota dele | bem de terceiro **entra** na sua guarda |
+| 6916 / 5916 — retorno ao dono | bem de terceiro **sai** da sua guarda |
+
+Nada disso altera quantidade, valor ou custo do seu estoque. Na ficha do item,
+essas linhas aparecem como *bem de terceiro*, sem mexer no saldo.
+
+Na tela Estoque, o cartão **Bens de terceiros em seu poder** mostra o que
+entrou para conserto e ainda não voltou. **Saldo negativo** ali é devolução
+sem a entrada correspondente: a nota de entrada não foi importada, ou foi
+importada com o código do cliente e espera o de-para.
+
 O sistema recusa gerar o movimento nesses casos de propósito. Um Kardex com
 furo visível é auditável; um com número adivinhado, não.
 

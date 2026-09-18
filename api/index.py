@@ -367,6 +367,8 @@ ROTAS = {
     "/api/periodo": rota_periodo,
     "/api/periodo/resumo": lambda qs: um(consulta_rest(
         "rpc/estoque_periodo_resumo", _periodo_params(qs))),
+    "/api/estoque/de-terceiros": lambda qs: consulta_rest(
+        "rpc/estoque_de_terceiros", {"p_data": (qs.get("data") or ["2026-12-31"])[0][:10]}),
     "/api/resultado": rota_resultado,
     "/api/apuracao": rota_apuracao,
     "/api/apuracao/consistencia": rota_apuracao_consistencia,
