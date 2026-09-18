@@ -363,6 +363,81 @@ O custeio é o mesmo do resto do sistema: média ponderada móvel, saída baixan
 pelo custo. Um método diferente só nesta tela criaria dois números para a mesma
 mercadoria.
 
+### Apuração fiscal
+
+Tela **Apuração**. Escolha o mês e a filial. Para cada tributo, o sistema põe
+lado a lado o **recalculado** — somado dos impostos destacados nas NF-e — e o
+**declarado** na EFD ICMS/IPI do mesmo mês, com a diferença.
+
+| Tributo | Recalculado | Declarado | Apura por |
+|---|---|---|---|
+| ICMS próprio | notas | E110 | filial |
+| ICMS-ST | notas | E210 | filial e UF de destino |
+| DIFAL e FCP | notas | E310 | filial e UF de destino |
+| IPI | notas | E520 | filial |
+| PIS, COFINS, IRPJ, CSLL | faturamento | — | empresa |
+
+**Débito** é o imposto destacado nas saídas da filial. **Crédito** é o
+destacado nas entradas que foram para o estoque — compra, importação,
+transferência recebida, devolução de venda. Entrada de uso e consumo não gera
+crédito, e a mercadoria parada no de-para também não: o ICMS dela aparece à
+parte, como *crédito pendente*.
+
+O que dá para confrontar com as notas são **débitos e créditos**. Ajustes,
+saldo credor anterior e o valor a recolher só existem no declarado, e aparecem
+para leitura.
+
+**Tributos federais** são da empresa, somando as filiais e deixando fora o que
+circula entre elas. As notas indicam Lucro Presumido, regime cumulativo (PIS
+0,65% e COFINS 3%, sem crédito):
+
+- A exclusão do ICMS da base de PIS/COFINS (Tema 69 do STF) aparece
+  calculada ao lado, não aplicada. É escolha da empresa, e o que se audita é se
+  ela fez o que declarou.
+- IRPJ e CSLL apuram por trimestre. O valor do mês é uma prévia: base de 8% e
+  12% da receita de revenda, IRPJ de 15% mais adicional de 10% acima de
+  R$ 20.000 de base por mês, CSLL de 9%.
+- IBS e CBS destacados aparecem como informativos: em 2026 são fase de teste.
+- O confronto desses tributos precisa da EFD-Contribuições e da ECF/DCTF, que o
+  sistema ainda não lê.
+
+**Consistência das EFDs.** No fim da tela, cada EFD importada é conferida
+contra ela mesma: os débitos e créditos do E110 batem com o ICMS dos documentos
+(C190)? A conta do E110 fecha com o valor declarado a recolher ou a
+transportar? E o IPI do E520 com o C190? Essa conferência não precisa de nota
+nenhuma.
+
+**Notas e EFDs importadas antes da apuração existir** não têm os impostos
+gravados. Importe os mesmos arquivos de novo: nada é duplicado, e os impostos
+que faltavam são completados.
+
+### Resultado contábil — lucro ou prejuízo
+
+Tela **Resultado**. As notas dão receita, imposto e custo da mercadoria; o
+lucro depende também de folha, aluguel, frete e juros, que estão na
+contabilidade. Esta tela lê a **ECD** (SPED Contábil).
+
+- **Resultado do mês** = créditos menos débitos das contas de resultado,
+  **sem os lançamentos de encerramento**. No fechamento, as contas de resultado
+  são zeradas contra o patrimônio líquido; sem descontar isso, o mês de
+  fechamento mostraria zero. Positivo é lucro.
+- **DRE** com a estrutura do plano de contas da própria empresa, com o código
+  do plano referencial da Receita ao lado.
+- **Receita contábil × faturamento das notas**, mês a mês, nos meses que têm
+  as duas coisas. As contas tratadas como receita de venda aparecem na tela —
+  confira o critério.
+
+**O que pedir ao contador:**
+
+- A ECD de cada ano, o `.txt` transmitido, **com balancetes mensais**. ECD com
+  um único saldo anual não mostra o resultado mês a mês.
+- A ECD é entregue até o fim de junho do ano seguinte. Para o ano corrente,
+  peça que o contador **exporte no leiaute da ECD sem transmitir**, com os
+  meses já fechados — a maioria dos sistemas contábeis faz.
+
+Importe pela tela Importar (o sistema reconhece pelo conteúdo se o `.txt` é
+ECD ou EFD) ou por `python -m auditoria importar`.
+
 ---
 
 ## 7. Levantar e tratar os achados

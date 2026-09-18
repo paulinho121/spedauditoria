@@ -98,7 +98,24 @@ def cmd_importar(args):
         print("  Nada a importar.")
         return 1
     print(f"\nImportando {len(caminhos)} arquivo(s)\n" + "-" * 72)
+    from . import carga_ecd, carga_nfe, ecd
     for c in caminhos:
+        if c.lower().endswith(".txt") and ecd.e_ecd(c):
+            # ECD e EFD são .txt: quem decide é o conteúdo, não a extensão.
+            re_ = carga_ecd.importa(c)
+            print(f"  {re_.situacao:<22} ECD #{re_.arquivo_id}  {re_.arquivo[:52]}")
+            print(f"             {re_.contas} contas · {re_.saldos} saldos")
+            for tipo, det in re_.problemas:
+                print(f"             ! {tipo}: {det[:96]}")
+            continue
+        if c.lower().endswith(".xml"):
+            # NF-e e cancelamento vão pelo importador de notas. Antes todo
+            # arquivo ia para o leitor de EFD, e um XML falhava ali.
+            rn = carga_nfe.importa(c)
+            print(f"  {rn.situacao:<22} {rn.arquivo[:56]}")
+            for av in rn.avisos:
+                print(f"             ! {av[:100]}")
+            continue
         r = carga.importa(c)
         rot = {"importado": "importado ", "ja_importado": "já estava ",
                "substituiu": "SUBSTITUIU"}[r.situacao]

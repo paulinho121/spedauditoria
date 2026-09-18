@@ -71,6 +71,7 @@ class ItemNFe:
     v_outro: Decimal = None
     ind_tot: str = ""
     cst_icms: str = ""
+    impostos: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -114,6 +115,75 @@ def _txt(no, caminho):
         return ""
     achado = no.find(caminho, NS)
     return (achado.text or "").strip() if achado is not None else ""
+
+
+def _grupo(pai, nome):
+    """
+    O primeiro filho de um grupo de imposto. ICMS, PIS, COFINS e IPI vêm
+    embrulhados num subgrupo que muda conforme a tributação — ICMS00, ICMS60,
+    ICMSSN102, PISAliq, PISOutr, IPITrib, IPINT... Os campos têm o mesmo nome
+    em todos; o que muda é quais estão presentes.
+    """
+    g = pai.find("n:" + nome, NS) if pai is not None else None
+    if g is None:
+        return None, ""
+    for filho in g:
+        if filho.tag.endswith("}cEnq") or filho.tag.endswith("}CNPJProd"):
+            continue
+        if len(filho):
+            return filho, filho.tag.split("}")[1]
+    return g, nome
+
+
+def impostos_do_item(det):
+    """
+    Impostos de uma linha da nota, como a nota os destacou. Nada é recalculado
+    aqui: o que interessa para auditar é o que foi DESTACADO, para confrontar com
+    o recálculo e com o declarado.
+
+    IBS e CBS são da Reforma Tributária; em 2026 são destaque de teste.
+    """
+    imp = det.find("n:imposto", NS)
+    if imp is None:
+        return {}
+    d = {}
+    icms, grupo = _grupo(imp, "ICMS")
+    if icms is not None:
+        d.update(icms_grupo=grupo, icms_orig=_txt(icms, "n:orig"),
+                 icms_cst=_txt(icms, "n:CST") or _txt(icms, "n:CSOSN"),
+                 icms_vbc=dec(_txt(icms, "n:vBC")), icms_p=dec(_txt(icms, "n:pICMS")),
+                 icms_v=dec(_txt(icms, "n:vICMS")),
+                 icms_deson=dec(_txt(icms, "n:vICMSDeson")),
+                 st_vbc=dec(_txt(icms, "n:vBCST")), st_p=dec(_txt(icms, "n:pICMSST")),
+                 st_v=dec(_txt(icms, "n:vICMSST")), fcpst_v=dec(_txt(icms, "n:vFCPST")),
+                 st_ret_v=dec(_txt(icms, "n:vICMSSTRet")))
+    dif = imp.find("n:ICMSUFDest", NS)
+    if dif is not None:
+        d.update(difal_vbc=dec(_txt(dif, "n:vBCUFDest")),
+                 difal_p_dest=dec(_txt(dif, "n:pICMSUFDest")),
+                 difal_p_inter=dec(_txt(dif, "n:pICMSInter")),
+                 difal_v=dec(_txt(dif, "n:vICMSUFDest")),
+                 difal_fcp_v=dec(_txt(dif, "n:vFCPUFDest")),
+                 difal_remet_v=dec(_txt(dif, "n:vICMSUFRemet")))
+    ipi, _ = _grupo(imp, "IPI")
+    if ipi is not None:
+        d.update(ipi_cst=_txt(ipi, "n:CST"), ipi_vbc=dec(_txt(ipi, "n:vBC")),
+                 ipi_p=dec(_txt(ipi, "n:pIPI")), ipi_v=dec(_txt(ipi, "n:vIPI")))
+    ii = imp.find("n:II", NS)
+    if ii is not None:
+        d["ii_v"] = dec(_txt(ii, "n:vII"))
+    for nome, pref, pal in (("PIS", "pis", "PIS"), ("COFINS", "cofins", "COFINS")):
+        g, _ = _grupo(imp, nome)
+        if g is not None:
+            d.update({pref + "_cst": _txt(g, "n:CST"), pref + "_vbc": dec(_txt(g, "n:vBC")),
+                      pref + "_p": dec(_txt(g, "n:p" + pal)),
+                      pref + "_v": dec(_txt(g, "n:v" + pal))})
+    ibs = imp.find("n:IBSCBS", NS)
+    if ibs is not None:
+        d.update(ibscbs_cst=_txt(ibs, "n:CST"),
+                 ibs_v=dec(_txt(ibs, ".//n:gIBSCBS/n:vIBS")),
+                 cbs_v=dec(_txt(ibs, ".//n:gIBSCBS/n:gCBS/n:vCBS")))
+    return d
 
 
 def parse(caminho):
@@ -196,6 +266,7 @@ def parse(caminho):
             v_outro=dec(_txt(prod, "n:vOutro")),
             ind_tot=_txt(prod, "n:indTot"),
             cst_icms=cst,
+            impostos=impostos_do_item(det),
         ))
 
     # Situação: o protocolo manda. Sem protocolo, assume autorizada e avisa.

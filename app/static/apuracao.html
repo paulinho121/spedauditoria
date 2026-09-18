@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apuração fiscal — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+td.dif-ok  { color: var(--success-dark); }
+td.dif-mal { color: var(--error); font-weight: 700; }
+.bloco { margin-bottom: 28px; }
+.nota-rodape { font-size: 12.5px; color: var(--on-surface-variant); line-height: 1.6; margin: 10px 0 0; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Apuração fiscal · recalculada pelos XML, confrontada com a EFD</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Estoque</a>
+    <a href="/mes">Mês</a>
+    <a class="on" href="/apuracao">Apuração</a>
+    <a href="/resultado">Resultado</a>
+    <a href="/importar">Importar</a>
+    <a href="/achados">Achados</a>
+    <a href="/relatorio">Relatório</a>
+    <a href="/manual">Manual</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="lbl">Período e estabelecimento</div>
+    <div class="controls" style="margin:12px 0 0">
+      <input type="month" id="mes" value="2026-07">
+      <select id="uf">
+        <option value="SP">● SP — 05502390000383</option>
+        <option value="CE">● CE — 05502390000111</option>
+        <option value="SC">● SC — 05502390000200</option>
+      </select>
+    </div>
+    <p class="nota-rodape">
+      <b>Recalculado</b>: soma dos impostos destacados nas NF-e do mês. Débito é o
+      que a filial destacou nas saídas; crédito, o destacado nas entradas que
+      <b>entraram no estoque</b> — compra, importação, transferência recebida,
+      devolução de venda. Entrada de uso e consumo não gera crédito.
+      <b>Declarado</b>: o bloco E da EFD ICMS/IPI do mesmo mês. Sem a EFD do mês, só
+      o recalculado aparece.
+    </p>
+  </div>
+
+  <div id="aviso-sem-efd" hidden class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
+    <div class="lbl">Sem EFD deste mês para esta filial</div>
+    <p style="margin:8px 0 0;font-size:14px">
+      O confronto com o declarado aparece quando a EFD ICMS/IPI do mesmo mês for
+      importada. Até lá, a coluna <i>Declarado</i> fica vazia e o recalculado vale
+      como referência — por exemplo, para conferir a guia paga.
+    </p>
+  </div>
+
+  <div class="bloco">
+    <h2 class="sec">ICMS próprio <small id="icms-uf"></small></h2>
+    <div class="wrap"><table id="tbl-icms">
+      <thead><tr><th>Rubrica</th><th class="num">Recalculado (XML)</th>
+        <th class="num">Declarado (EFD)</th><th class="num">Diferença</th></tr></thead>
+      <tbody><tr><td colspan="4" class="skel">carregando…</td></tr></tbody>
+    </table></div>
+    <p class="nota-rodape" id="icms-nota"></p>
+  </div>
+
+  <div class="bloco">
+    <h2 class="sec">ICMS-ST <small>por UF de destino — a filial como substituta</small></h2>
+    <div class="wrap"><table id="tbl-st">
+      <thead><tr><th>UF</th><th class="num">Notas</th><th class="num">Recalculado</th>
+        <th class="num">Declarado (E210)</th><th class="num">Diferença</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+
+  <div class="bloco">
+    <h2 class="sec">DIFAL e FCP <small>venda a não contribuinte de outro estado — por UF de destino</small></h2>
+    <div class="wrap"><table id="tbl-difal">
+      <thead><tr><th>UF</th><th>Tributo</th><th class="num">Notas</th><th class="num">Recalculado</th>
+        <th class="num">Declarado (E310)</th><th class="num">Diferença</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+
+  <div class="bloco">
+    <h2 class="sec">IPI <small>importadora equiparada a industrial</small></h2>
+    <div class="wrap"><table id="tbl-ipi">
+      <thead><tr><th>Rubrica</th><th class="num">Recalculado (XML)</th>
+        <th class="num">Declarado (E520)</th><th class="num">Diferença</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+
+  <div class="bloco">
+    <h2 class="sec">Tributos federais <small>da empresa — as três filiais somadas, sem as notas entre elas</small></h2>
+    <section class="grid kpis" id="fed-kpis"><div class="skel">carregando…</div></section>
+    <div class="wrap" style="margin-top:12px"><table id="tbl-fed">
+      <thead><tr><th>Rubrica</th><th class="num">Valor</th><th class="desc">Como foi calculado</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <p class="nota-rodape">
+      Lucro Presumido, regime cumulativo — é o que as notas indicam (PIS 0,65% e
+      COFINS 3% sem crédito). <b>IRPJ e CSLL apuram por trimestre</b>: o valor do mês
+      é uma prévia. A exclusão do ICMS da base de PIS/COFINS (Tema 69 do STF) vem
+      calculada ao lado, não aplicada — é escolha da empresa, e o que se audita é
+      se ela fez o que declarou. O confronto destes tributos precisa da
+      EFD-Contribuições e da ECF/DCTF, que o sistema ainda não lê.
+    </p>
+  </div>
+
+  <div class="bloco">
+    <h2 class="sec">Consistência das EFDs importadas <small>a apuração declarada bate com os documentos da própria EFD?</small></h2>
+    <div id="consistencia"><div class="skel">carregando…</div></div>
+  </div>
+</main>
+
+<script src="/app.js"></script>
+<script>ligarSair(); ligarTrabalhos();</script>
+<script>
+const $ = id => document.getElementById(id);
+const UF_DA_FILIAL = { SP: 'SP', CE: 'CE', SC: 'SC' };
+
+function card(lbl, val, foot, cls) {
+  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+          <div class="val sm">${val}</div><div class="foot">${foot || ''}</div></div>`;
+}
+
+/** Célula de diferença: vazia quando não há declarado para comparar. */
+function dif(calc, decl) {
+  if (decl === null || decl === undefined) return '<td class="num muted">—</td>';
+  const d = (+calc || 0) - (+decl || 0);
+  return `<td class="num ${Math.abs(d) < 0.01 ? 'dif-ok' : 'dif-mal'}">${Math.abs(d) < 0.01 ? 'confere' : money(d)}</td>`;
+}
+const decl = v => (v === null || v === undefined) ? '<td class="num muted">sem EFD</td>'
+                                                  : `<td class="num">${money(v)}</td>`;
+
+function linhaCalc(calc, tributo, rubrica, uf) {
+  const r = calc.find(x => x.tributo === tributo && x.rubrica === rubrica && (!uf || x.uf === uf));
+  return r ? r : { valor: 0, notas: 0 };
+}
+
+async function carregar() {
+  const mes = $('mes').value, uf = $('uf').value;
+  if (!mes) return;
+  let a;
+  try { a = await api(`/api/apuracao?mes=${mes}&uf=${uf}`); } catch (e) { return falha(e); }
+  const C = a.calculada || [], D = a.declarada || [];
+  const dI = D.find(x => x.tributo === 'icms');
+  $('aviso-sem-efd').hidden = !!dI;
+  $('icms-uf').textContent = `${a.uf} · ${mes.split('-').reverse().join('/')}`;
+
+  // ------------------------------------------------------------- ICMS
+  const deb = +linhaCalc(C, 'icms', 'debito').valor;
+  const cre = +linhaCalc(C, 'icms', 'credito').valor;
+  const pen = linhaCalc(C, 'icms', 'credito_pendente');
+  const linhasIcms = [
+    ['Débitos (saídas)', deb, dI ? dI.debitos : null, true],
+    ['Créditos (entradas que foram para o estoque)', cre, dI ? dI.creditos : null, true],
+    ['Ajustes a débito (C197, E111, estornos)', null, dI ? dI.ajustes_debito : null, false],
+    ['Ajustes a crédito (C197, E111, estornos)', null, dI ? dI.ajustes_credito : null, false],
+    ['Saldo credor do mês anterior', null, dI ? dI.saldo_credor_anterior : null, false],
+    ['Débitos − créditos das notas', deb - cre, dI ? (+dI.debitos - +dI.creditos) : null, true],
+    ['A recolher', null, dI ? dI.a_recolher : null, false],
+    ['Saldo credor a transportar', null, dI ? dI.saldo_credor_transportar : null, false],
+  ];
+  fill('tbl-icms', linhasIcms, ([r, c, d, compara]) => `
+    <td>${r}</td>
+    <td class="num">${c === null ? '<span class="muted">—</span>' : money(c)}</td>
+    ${decl(d)}
+    ${compara ? dif(c, d) : '<td class="num muted">—</td>'}`);
+  $('icms-nota').innerHTML =
+    (+pen.valor ? `<b>${money(pen.valor)}</b> de ICMS destacado em ${n(pen.notas)} nota(s) de entrada ` +
+      `ainda não entrou como crédito: a mercadoria está parada no de-para. ` : '') +
+    'Ajustes, saldo anterior e o valor a recolher só existem no declarado — o ' +
+    'confronto que as notas permitem é o de débitos e créditos.';
+
+  // --------------------------------------------------------------- ST
+  const ufsSt = [...new Set([...C.filter(x => x.tributo === 'st').map(x => x.uf),
+                             ...D.filter(x => x.tributo === 'st').map(x => x.uf)])].sort();
+  fill('tbl-st', ufsSt, u => {
+    const c = linhaCalc(C, 'st', 'debito', u), d = D.find(x => x.tributo === 'st' && x.uf === u);
+    return `<td>${chipUF(u)}</td><td class="num">${n(c.notas)}</td>
+      <td class="num">${money(c.valor)}</td>${decl(d ? d.debitos : null)}${dif(c.valor, d ? d.debitos : (dI ? 0 : null))}`;
+  });
+  if (!ufsSt.length) $('tbl-st').querySelector('tbody').innerHTML =
+    '<tr><td colspan="5" class="skel">nenhuma retenção de ST no período</td></tr>';
+
+  // ------------------------------------------------------------ DIFAL
+  const pares = [];
+  for (const t of ['difal', 'fcp']) {
+    const us = new Set([...C.filter(x => x.tributo === t).map(x => x.uf),
+                        ...D.filter(x => x.tributo === t && +x.debitos).map(x => x.uf)]);
+    [...us].sort().forEach(u => pares.push([u, t]));
+  }
+  fill('tbl-difal', pares, ([u, t]) => {
+    const c = linhaCalc(C, t, 'debito', u), d = D.find(x => x.tributo === t && x.uf === u);
+    return `<td>${chipUF(u)}</td><td>${t === 'difal' ? 'DIFAL' : 'FCP'}</td>
+      <td class="num">${n(c.notas)}</td><td class="num">${money(c.valor)}</td>
+      ${decl(d ? d.debitos : (dI ? 0 : null))}${dif(c.valor, d ? d.debitos : (dI ? 0 : null))}`;
+  });
+  if (!pares.length) $('tbl-difal').querySelector('tbody').innerHTML =
+    '<tr><td colspan="6" class="skel">nenhum DIFAL no período</td></tr>';
+
+  // -------------------------------------------------------------- IPI
+  const dP = D.find(x => x.tributo === 'ipi');
+  const ipiD = +linhaCalc(C, 'ipi', 'debito').valor, ipiC = +linhaCalc(C, 'ipi', 'credito').valor;
+  fill('tbl-ipi', [
+    ['Débitos (saídas)', ipiD, dP ? dP.debitos : null, true],
+    ['Créditos (entradas)', ipiC, dP ? dP.creditos : null, true],
+    ['Débitos − créditos', ipiD - ipiC, dP ? (+dP.debitos - +dP.creditos) : null, true],
+    ['A recolher', null, dP ? dP.a_recolher : null, false],
+    ['Saldo credor a transportar', null, dP ? dP.saldo_credor_transportar : null, false],
+  ], ([r, c, d, compara]) => `<td>${r}</td>
+    <td class="num">${c === null ? '<span class="muted">—</span>' : money(c)}</td>
+    ${decl(d)}${compara ? dif(c, d) : '<td class="num muted">—</td>'}`);
+
+  // --------------------------------------------------------- federais
+  const F = Object.fromEntries((a.federal || []).map(x => [x.rubrica, x]));
+  const v = k => +(F[k] || {}).valor || 0;
+  $('fed-kpis').innerHTML = [
+    card('Receita bruta', money(v('receita_bruta')), `devoluções ${money(v('devolucoes'))}`),
+    card('PIS + COFINS', money(v('pis') + v('cofins')),
+         `sem o ICMS na base: ${money(v('pis_sem_icms') + v('cofins_sem_icms'))}`),
+    card('IRPJ + CSLL (prévia)', money(v('irpj') + v('csll')), 'apuração é trimestral'),
+    card('IBS + CBS destacados', money(v('ibs_destacado') + v('cbs_destacado')), '2026: fase de teste'),
+  ].join('');
+  if (v('linhas_sem_imposto') > 0) {
+    $('fed-kpis').insertAdjacentHTML('beforeend', card('Linhas sem imposto gravado',
+      n(v('linhas_sem_imposto')), 'reimporte os XML dessas notas para completar', 'alert'));
+  }
+  const ordem = ['receita_bruta','devolucoes','base_pis_cofins','pis','cofins','icms_na_base',
+                 'pis_sem_icms','cofins_sem_icms','pis_destacado','cofins_destacado',
+                 'base_irpj','irpj','base_csll','csll','ibs_destacado','cbs_destacado'];
+  const rot = { receita_bruta: 'Receita bruta', devolucoes: 'Devoluções de venda',
+    base_pis_cofins: 'Base de PIS/COFINS', pis: 'PIS a recolher', cofins: 'COFINS a recolher',
+    icms_na_base: 'ICMS dentro da base', pis_sem_icms: 'PIS sem o ICMS na base',
+    cofins_sem_icms: 'COFINS sem o ICMS na base', pis_destacado: 'PIS destacado nas notas',
+    cofins_destacado: 'COFINS destacado nas notas', base_irpj: 'Base presumida de IRPJ',
+    irpj: 'IRPJ (prévia do mês)', base_csll: 'Base presumida de CSLL', csll: 'CSLL (prévia do mês)',
+    ibs_destacado: 'IBS destacado', cbs_destacado: 'CBS destacada' };
+  fill('tbl-fed', ordem.filter(k => F[k]), k => `
+    <td>${rot[k]}</td><td class="num"><b>${money(F[k].valor)}</b></td>
+    <td class="desc muted">${esc(F[k].detalhe)}</td>`);
+}
+
+async function consistencia() {
+  let arqs;
+  try { arqs = await api('/api/apuracao/consistencia'); } catch (e) { return; }
+  $('consistencia').innerHTML = arqs.map(a => `
+    <div class="card" style="margin-bottom:12px">
+      <div class="lbl">${chipUF(a.uf)} EFD ${brDate(a.dt_ini)} a ${brDate(a.dt_fin)}</div>
+      ${+a.tem_bloco_e ? `<div class="wrap" style="margin-top:10px"><table>
+        <thead><tr><th>Verificação</th><th class="num">Declarado</th><th class="num">Documentos</th><th>Resultado</th></tr></thead>
+        <tbody>${a.verificacoes.map(v => `<tr>
+          <td>${esc(v.verificacao)}</td><td class="num">${money(v.declarado)}</td>
+          <td class="num">${money(v.calculado)}</td>
+          <td>${v.ok ? '<span class="chip ok">confere</span>'
+                     : '<span class="chip err">diferença ' + money(v.diferenca) + '</span>'}</td>
+        </tr>`).join('')}</tbody></table></div>`
+      : `<p class="nota-rodape">Esta EFD foi importada antes de o sistema ler o bloco E.
+          Importe o mesmo arquivo de novo para trazer a apuração — nada é duplicado.</p>`}
+    </div>`).join('') || '<div class="skel">nenhuma EFD importada</div>';
+}
+
+$('mes').onchange = carregar;
+$('uf').onchange = carregar;
+carregar();
+consistencia();
+</script>
+</body>
+</html>

@@ -57,6 +57,7 @@ def payload_efd(caminho, quem=None):
         "inventario": efd.inventario,
         "inventario_itens": efd.inventario_itens,
         "documentos": efd.documentos,
+        "apuracao": efd.apuracao,
     }, problemas
 
 

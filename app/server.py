@@ -193,6 +193,61 @@ def sql_faturamento(mes, uf, funcao="faturamento_periodo"):
     return f"select * from {funcao}({ini}, {fim}, {_cnpj_da_uf(uf)})"
 
 
+def apuracao(qs):
+    """
+    As duas pontas da apuração de um mês: recalculado pelos XML e declarado na
+    EFD. ICMS, ST, DIFAL e IPI são da filial; os federais, da empresa.
+    """
+    mes = (qs.get("mes") or [""])[0]
+    uf = (qs.get("uf") or ["SP"])[0]
+    uf = uf if uf in ("SP", "CE", "SC") else "SP"
+    ini, fim = _mes(mes, "2026-07")
+    cnpj = _cnpj_da_uf(uf)
+    return {
+        "uf": uf,
+        "calculada": query(f"select * from apuracao_calculada({ini}, {fim}, {cnpj})"),
+        "declarada": query(f"select * from apuracao_declarada({ini}, {fim}, {cnpj})"),
+        "federal": query(f"select * from apuracao_federal_calculada({ini}, {fim})"),
+    }
+
+
+def resultado(qs):
+    """
+    Resultado contábil pela ECD. Sem período na consulta, usa tudo o que as
+    ECDs vigentes cobrem.
+    """
+    arqs = query("select id, cnpj, nome, dt_ini::text dt_ini, dt_fin::text dt_fin, "
+                 "nome_arquivo, problemas from ecd_arquivo where vigente order by dt_ini")
+    if not arqs:
+        return {"arquivos": [], "mensal": [], "dre": [], "receita": [], "contas_receita": []}
+    ini_q, fim_q = (qs.get("ini") or [""])[0], (qs.get("fim") or [""])[0]
+    ini = (f"date '{ini_q[:7]}-01'" if re.match(r"^\d{4}-\d{2}", ini_q)
+           else f"date '{arqs[0]['dt_ini']}'")
+    fim = (f"(date '{fim_q[:7]}-01' + interval '1 month - 1 day')::date"
+           if re.match(r"^\d{4}-\d{2}", fim_q) else f"date '{arqs[-1]['dt_fin']}'")
+    return {
+        "arquivos": arqs,
+        "mensal": query(f"select mes::text, receitas, custos_despesas, resultado, contas "
+                        f"from ecd_resultado_mensal({ini}, {fim})"),
+        "dre": query(f"select * from ecd_dre({ini}, {fim})"),
+        "receita": query(f"select mes::text, receita_contabil, faturamento_notas, diferenca "
+                         f"from confronto_receita({ini}, {fim})"),
+        "contas_receita": query("select * from ecd_contas_receita_venda()"),
+    }
+
+
+def apuracao_consistencia(qs):
+    """Cada EFD vigente conferida contra ela mesma: E110/E520 contra o C190."""
+    arqs = query("select id, cnpj, uf, dt_ini::text dt_ini, dt_fin::text dt_fin, "
+                 "nome_arquivo, (select count(*) from efd_apuracao a "
+                 "where a.arquivo_id = s.id) as tem_bloco_e "
+                 "from sped_arquivo s where vigente order by dt_ini desc, uf")
+    for a in arqs:
+        a["verificacoes"] = (query(f"select * from consistencia_efd({int(a['id'])})")
+                             if int(a["tem_bloco_e"]) else [])
+    return arqs
+
+
 def sql_periodo_bloqueios(mes):
     ini, fim = _mes(mes, "2023-01")
     return f"select * from periodo_bloqueios({ini}, {fim})"
@@ -274,20 +329,44 @@ def importar_upload(body):
     from auditoria import carga_nfe
     destino = os.path.join(os.path.dirname(HERE), "xmls", "recebidos")
     os.makedirs(destino, exist_ok=True)
+    import base64
+    from auditoria import carga, carga_ecd, ecd
     gravados = []
     for arq in (body or {}).get("arquivos", []):
         nome = os.path.basename(arq.get("nome") or "")
-        if not nome.lower().endswith(".xml"):
+        if not nome.lower().endswith((".xml", ".txt")):
             continue
         caminho = os.path.join(destino, nome)
-        with open(caminho, "w", encoding="utf-8", newline="") as fh:
-            fh.write(arq.get("conteudo") or "")
+        if "base64" in arq:
+            # .txt chega em bytes: EFD e ECD são latin-1, e só assim o arquivo
+            # gravado é idêntico ao original — com o mesmo hash.
+            with open(caminho, "wb") as fh:
+                fh.write(base64.b64decode(arq["base64"]))
+        else:
+            with open(caminho, "w", encoding="utf-8", newline="") as fh:
+                fh.write(arq.get("conteudo") or "")
         gravados.append(caminho)
     if not gravados:
-        return {"erro": "nenhum arquivo .xml recebido"}
-    cache, res = {}, []
+        return {"erro": "nenhum arquivo .xml ou .txt recebido"}
+    res = []
     for c in gravados:
-        res.append(carga_nfe.importa(c, cache=cache))
+        if c.lower().endswith(".xml"):
+            res.append(carga_nfe.importa(c))
+            continue
+        # .txt: ECD ou EFD, pelo conteúdo.
+        try:
+            if ecd.e_ecd(c):
+                r = carga_ecd.importa(c)
+                av = [f"ECD: {r.contas} contas, {r.saldos} saldos"] + \
+                     [f"{t}: {d}" for t, d in r.problemas]
+            else:
+                r = carga.importa(c)
+                av = [f"EFD {k} {v}" for k, v in (r.contagens or {}).items()][:1] + \
+                     [f"{t}: {d}" for t, d in r.problemas]
+            res.append(carga_nfe.ResultadoNFe(os.path.basename(c), r.situacao, avisos=av))
+        except Exception as e:
+            res.append(carga_nfe.ResultadoNFe(os.path.basename(c), "ignorado",
+                                              avisos=[f"{type(e).__name__}: {e}"]))
     _cache.clear()
     return {"destino": destino, "resumo": carga_nfe.resumo(res),
             "arquivos": [r.dict() for r in res]}
@@ -476,6 +555,9 @@ ROUTES = {
         (qs.get("origem") or ["nfe"])[0])),
     "/api/periodo/resumo": lambda qs: query(sql_periodo_resumo(
         (qs.get("mes") or [""])[0], (qs.get("origem") or ["nfe"])[0]))[0],
+    "/api/resultado": resultado,
+    "/api/apuracao": apuracao,
+    "/api/apuracao/consistencia": apuracao_consistencia,
     "/api/periodo/faturamento": lambda qs: query(sql_faturamento(
         (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0])),
     "/api/periodo/faturamento/notas": lambda qs: query(sql_faturamento(
@@ -676,6 +758,10 @@ class Handler(BaseHTTPRequestHandler):
             path = "/reconstrucao.html"
         if path == "/mes":
             path = "/mes.html"
+        if path == "/apuracao":
+            path = "/apuracao.html"
+        if path == "/resultado":
+            path = "/resultado.html"
         if path == "/importar":
             path = "/importar.html"
         if path == "/relatorio":

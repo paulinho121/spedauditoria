@@ -45,7 +45,32 @@ def _insere_lote(cur, tabela, colunas, linhas):
 
 
 def importa(caminho, quem=None):
-    """Importa um EFD. Devolve Resultado."""
+    """
+    Importa um EFD numa chamada, pela função importar_efd do banco — o mesmo
+    caminho do Vercel. Atômico por construção: a transação é do banco.
+
+    Reimportar um arquivo que já está no banco não duplica nada e completa o
+    que faltar da apuração (bloco E, C190 e impostos do C100), que só passaram
+    a ser lidos depois.
+    """
+    from . import carga_json
+    quem = quem or os.environ.get("AUDITOR") or getpass.getuser()
+    payload, problemas = carga_json.payload_efd(caminho, quem)
+    con = db.conecta()
+    r = con.consulta("select importar_efd(%s::jsonb) as r", (carga_json.como_texto(payload),))
+    r = r[0]["r"] if isinstance(r, list) else r["r"]
+    r = json.loads(r) if isinstance(r, str) else (r or {})
+    situacao = {"ja_importado": "ja_importado", "substituiu": "substituiu"}.get(
+        r.get("situacao"), "importado")
+    return Resultado(os.path.basename(caminho), situacao, r.get("arquivo_id"),
+                     r.get("contagens") or {}, problemas)
+
+
+def importa_em_varias_chamadas(caminho, quem=None):
+    """
+    Caminho antigo: uma chamada por lote de cada registro, sem transação quando
+    não há DATABASE_URL. Fica só como referência; importa() não o usa mais.
+    """
     efd = sped.parse(caminho)
     if not efd.cnpj:
         raise ValueError(f"{os.path.basename(caminho)}: registro 0000 ausente — "

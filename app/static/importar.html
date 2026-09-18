@@ -41,6 +41,8 @@ progress { width: 100%; height: 6px; margin-top: 10px; }
     <a href="/">Dashboard</a>
     <a href="/reconstrucao">Reconstrução</a>
     <a href="/mes">Mês</a>
+    <a href="/apuracao">Apuração</a>
+    <a href="/resultado">Resultado</a>
     <a class="on" href="/importar">Importar</a>
     <a href="/achados">Achados</a>
     <a href="/relatorio">Relatório</a>
@@ -77,7 +79,7 @@ progress { width: 100%; height: 6px; margin-top: 10px; }
       <div class="drop" id="drop">
         <h3>Arraste os XML aqui</h3>
         <p>ou clique para escolher — aceita a pasta inteira</p>
-        <input type="file" id="file" multiple accept=".xml" hidden>
+        <input type="file" id="file" multiple accept=".xml,.txt" hidden>
       </div>
       <progress id="prog" value="0" max="100" hidden></progress>
     </div>
@@ -401,9 +403,20 @@ function mostraResultado(r) {
   painel();
 }
 
+/** Bytes do arquivo em base64, sem passar por decodificação de texto. */
+async function emBase64(f) {
+  const b = new Uint8Array(await f.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
 async function enviar(arquivos) {
-  const xmls = [...arquivos].filter(f => f.name.toLowerCase().endsWith('.xml'));
-  if (!xmls.length) return linha('Nenhum .xml na seleção.', 'err');
+  // XML (NF-e e cancelamento) e TXT (EFD ou ECD — o servidor decide pelo
+  // conteúdo). O .txt vai em bytes: EFD e ECD são latin-1, e ler como texto no
+  // navegador decodificaria em UTF-8, estragando acento e o hash do arquivo.
+  const xmls = [...arquivos].filter(f => /\.(xml|txt)$/i.test(f.name));
+  if (!xmls.length) return linha('Nenhum .xml ou .txt na seleção.', 'err');
   log.innerHTML = '';
   linha(`Lendo ${xmls.length} arquivo(s)…`, 'mut');
   $('prog').hidden = false;
@@ -420,9 +433,9 @@ async function enviar(arquivos) {
   const naoEnviados = [];
   for (let i = 0; i < xmls.length; i += LOTE) {
     const parte = xmls.slice(i, i + LOTE);
-    const payload = await Promise.all(parte.map(async f => ({
-      nome: f.name, conteudo: await f.text()
-    })));
+    const payload = await Promise.all(parte.map(async f =>
+      /\.txt$/i.test(f.name) ? { nome: f.name, base64: await emBase64(f) }
+                             : { nome: f.name, conteudo: await f.text() }));
     linha(`Enviando ${i + 1}–${i + parte.length} de ${xmls.length}…`, 'mut');
     let r = null, ultimoErro = null;
     for (const espera of ESPERAS) {

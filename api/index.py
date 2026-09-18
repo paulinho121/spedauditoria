@@ -241,6 +241,51 @@ def _faturamento_params(qs):
     return p
 
 
+def rota_apuracao(qs):
+    ini, fim = _mes(qs, "2026-07")
+    uf = (qs.get("uf") or ["SP"])[0]
+    uf = uf if uf in ("SP", "CE", "SC") else "SP"
+    e = consulta_rest("estabelecimento", {"uf": f"eq.{uf}", "select": "cnpj"})
+    cnpj = e[0]["cnpj"] if e else ""
+    p = {"p_ini": ini, "p_fim": fim, "p_cnpj": cnpj}
+    return {"uf": uf,
+            "calculada": consulta_rest("rpc/apuracao_calculada", p),
+            "declarada": consulta_rest("rpc/apuracao_declarada", p),
+            "federal": consulta_rest("rpc/apuracao_federal_calculada",
+                                     {"p_ini": ini, "p_fim": fim})}
+
+
+def rota_resultado(qs):
+    arqs = consulta_rest("ecd_arquivo", {
+        "vigente": "is.true", "order": "dt_ini.asc",
+        "select": "id,cnpj,nome,dt_ini,dt_fin,nome_arquivo,problemas"})
+    if not arqs:
+        return {"arquivos": [], "mensal": [], "dre": [], "receita": [], "contas_receita": []}
+    ini_q, fim_q = (qs.get("ini") or [""])[0], (qs.get("fim") or [""])[0]
+    ini = f"{ini_q[:7]}-01" if re.match(r"^\d{4}-\d{2}", ini_q) else arqs[0]["dt_ini"]
+    if re.match(r"^\d{4}-\d{2}", fim_q):
+        a, m = int(fim_q[:4]), int(fim_q[5:7])
+        fim = f"{fim_q[:7]}-{calendar.monthrange(a, m)[1]:02d}"
+    else:
+        fim = arqs[-1]["dt_fin"]
+    p = {"p_ini": ini, "p_fim": fim}
+    return {"arquivos": arqs,
+            "mensal": consulta_rest("rpc/ecd_resultado_mensal", p),
+            "dre": consulta_rest("rpc/ecd_dre", p),
+            "receita": consulta_rest("rpc/confronto_receita", p),
+            "contas_receita": consulta_rest("rpc/ecd_contas_receita_venda", {})}
+
+
+def rota_apuracao_consistencia(qs):
+    arqs = consulta_rest("sped_arquivo", {
+        "vigente": "is.true", "order": "dt_ini.desc,uf.asc",
+        "select": "id,cnpj,uf,dt_ini,dt_fin,nome_arquivo"})
+    for a in arqs:
+        a["verificacoes"] = consulta_rest("rpc/consistencia_efd", {"p_arquivo_id": a["id"]})
+        a["tem_bloco_e"] = len(a["verificacoes"])
+    return arqs
+
+
 def rota_inventario(qs):
     limite = min(int((qs.get("limit") or ["60"])[0]), 500)
     offset = int((qs.get("offset") or ["0"])[0])
@@ -322,6 +367,9 @@ ROTAS = {
     "/api/periodo": rota_periodo,
     "/api/periodo/resumo": lambda qs: um(consulta_rest(
         "rpc/estoque_periodo_resumo", _periodo_params(qs))),
+    "/api/resultado": rota_resultado,
+    "/api/apuracao": rota_apuracao,
+    "/api/apuracao/consistencia": rota_apuracao_consistencia,
     "/api/periodo/faturamento": lambda qs: consulta_rest(
         "rpc/faturamento_periodo", _faturamento_params(qs)),
     "/api/periodo/faturamento/notas": lambda qs: consulta_rest(
@@ -457,7 +505,7 @@ def importar_upload(corpo):
     _sobe_auditoria()
     import tempfile
     from collections import Counter
-    from auditoria import carga_json, nfe as pnfe
+    from auditoria import carga_json, ecd as pecd, nfe as pnfe
 
     pasta = tempfile.mkdtemp(prefix="fs_")
     saida = []
@@ -466,12 +514,22 @@ def importar_upload(corpo):
         if not nome:
             continue
         caminho = os.path.join(pasta, nome)
-        # EFD é latin-1 por definição do layout; NF-e é UTF-8.
-        cod = "latin-1" if nome.lower().endswith(".txt") else "utf-8"
         try:
-            with open(caminho, "w", encoding=cod, errors="replace", newline="") as fh:
-                fh.write(arq.get("conteudo") or "")
-            if nome.lower().endswith(".xml") and pnfe.e_evento(caminho):
+            if "base64" in arq:
+                # EFD e ECD chegam em bytes, idênticos ao original.
+                import base64
+                with open(caminho, "wb") as fh:
+                    fh.write(base64.b64decode(arq["base64"]))
+            else:
+                # EFD é latin-1 por definição do layout; NF-e é UTF-8.
+                cod = "latin-1" if nome.lower().endswith(".txt") else "utf-8"
+                with open(caminho, "w", encoding=cod, errors="replace", newline="") as fh:
+                    fh.write(arq.get("conteudo") or "")
+            if nome.lower().endswith(".txt") and pecd.e_ecd(caminho):
+                from auditoria import carga_ecd
+                payload, probs = carga_ecd.payload(caminho)
+                r = chama_rpc("importar_ecd", payload)
+            elif nome.lower().endswith(".xml") and pnfe.e_evento(caminho):
                 # Cancelamento avulso: sem isto caía em "ignorado" por não ter
                 # infNFe, e a nota cancelada seguia no estoque.
                 payload, _ev = carga_json.payload_evento(caminho)
@@ -571,6 +629,10 @@ def app(environ, start_response):
         caminho = "/reconstrucao.html"
     elif caminho == "/mes":
         caminho = "/mes.html"
+    elif caminho == "/apuracao":
+        caminho = "/apuracao.html"
+    elif caminho == "/resultado":
+        caminho = "/resultado.html"
     elif caminho == "/importar":
         caminho = "/importar.html"
     elif caminho == "/relatorio":

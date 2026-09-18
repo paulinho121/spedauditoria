@@ -95,6 +95,9 @@ class Efd:
     contagem: dict = field(default_factory=dict)
     linhas_lidas: int = 0
     contadores_9900: dict = field(default_factory=dict)
+    # Bloco E: o que a empresa DECLAROU como apuração. Uma lista de registros,
+    # cada um com o tributo, a UF (ST e DIFAL apuram por UF) e os valores.
+    apuracao: list = field(default_factory=list)
 
     @property
     def detalha_itens(self):
@@ -119,6 +122,7 @@ def parse(caminho):
     efd = Efd(caminho=caminho, nome_arquivo=os.path.basename(caminho),
               sha256=sha256(caminho))
     doc_atual = None
+    uf_apur = ""
 
     for n, reg, p in ler_registros(caminho):
         efd.linhas_lidas += 1
@@ -170,13 +174,118 @@ def parse(caminho):
 
         elif reg == "C100":
             # |C100|IND_OPER|IND_EMIT|COD_PART|COD_MOD|COD_SIT|SER|NUM_DOC|CHV_NFE|DT_DOC|DT_E_S|VL_DOC|...
+            # ...|IND_PGTO|VL_DESC|VL_ABAT_NT|VL_MERC|IND_FRT|VL_FRT|VL_SEG|VL_OUT_DA|
+            #    VL_BC_ICMS|VL_ICMS|VL_BC_ICMS_ST|VL_ICMS_ST|VL_IPI|VL_PIS|VL_COFINS|
             doc_atual = {
                 "ind_oper": campo(p, 2), "ind_emit": campo(p, 3), "cod_part": campo(p, 4),
                 "cod_mod": campo(p, 5), "cod_sit": campo(p, 6), "ser": campo(p, 7),
                 "num_doc": campo(p, 8), "chv_nfe": campo(p, 9),
                 "dt_doc": data(campo(p, 10)), "dt_e_s": data(campo(p, 11)),
-                "vl_doc": dec(campo(p, 12)), "linha": n, "itens": []}
+                "vl_doc": dec(campo(p, 12)), "linha": n, "itens": [], "analitico": [],
+                "impostos": {
+                    "vl_desc": dec(campo(p, 14)), "vl_merc": dec(campo(p, 16)),
+                    "vl_bc_icms": dec(campo(p, 21)), "vl_icms": dec(campo(p, 22)),
+                    "vl_bc_st": dec(campo(p, 23)), "vl_st": dec(campo(p, 24)),
+                    "vl_ipi": dec(campo(p, 25)), "vl_pis": dec(campo(p, 26)),
+                    "vl_cofins": dec(campo(p, 27))}}
             efd.documentos.append(doc_atual)
+
+        elif reg == "C190" and doc_atual is not None:
+            # |C190|CST_ICMS|CFOP|ALIQ_ICMS|VL_OPR|VL_BC_ICMS|VL_ICMS|VL_BC_ICMS_ST|
+            #  VL_ICMS_ST|VL_RED_BC|VL_IPI|COD_OBS|
+            # É o C190, e não o C170, que alimenta a apuração: existe mesmo no
+            # perfil B, onde o C170 é dispensado.
+            doc_atual["analitico"].append({
+                "cst_icms": campo(p, 2), "cfop": campo(p, 3),
+                "aliq": dec(campo(p, 4)), "vl_opr": dec(campo(p, 5)),
+                "vl_bc_icms": dec(campo(p, 6)), "vl_icms": dec(campo(p, 7)),
+                "vl_bc_st": dec(campo(p, 8)), "vl_st": dec(campo(p, 9)),
+                "vl_red_bc": dec(campo(p, 10)), "vl_ipi": dec(campo(p, 11)),
+                "linha": n})
+
+        elif reg in ("E200", "E300"):
+            # |E200|UF|DT_INI|DT_FIN| — abre a apuração de ST (E210) ou DIFAL
+            # (E310) daquela UF.
+            uf_apur = campo(p, 2)
+
+        elif reg == "E110":
+            # |E110|VL_TOT_DEBITOS|VL_AJ_DEBITOS|VL_TOT_AJ_DEBITOS|VL_ESTORNOS_CRED|
+            #  VL_TOT_CREDITOS|VL_AJ_CREDITOS|VL_TOT_AJ_CREDITOS|VL_ESTORNOS_DEB|
+            #  VL_SLD_CREDOR_ANT|VL_SLD_APURADO|VL_TOT_DED|VL_ICMS_RECOLHER|
+            #  VL_SLD_CREDOR_TRANSPORTAR|DEB_ESP|
+            # Há DOIS ajustes de cada lado: VL_AJ_* vem dos documentos (C197) e
+            # VL_TOT_AJ_* da própria apuração (E111). A primeira versão desta
+            # leitura somava só um deles, e o E110 de SC de fev/2023 parecia não
+            # fechar por R$ 3.696,31 — quando fechava no centavo.
+            efd.apuracao.append({
+                "tributo": "icms", "uf": efd.uf, "linha": n,
+                "debitos": dec0(campo(p, 2)),
+                "ajustes_debito_doc": dec0(campo(p, 3)),
+                "ajustes_debito": dec0(campo(p, 4)),
+                "estornos_credito": dec0(campo(p, 5)),
+                "creditos": dec0(campo(p, 6)),
+                "ajustes_credito_doc": dec0(campo(p, 7)),
+                "ajustes_credito": dec0(campo(p, 8)),
+                "estornos_debito": dec0(campo(p, 9)),
+                "saldo_credor_anterior": dec0(campo(p, 10)),
+                "saldo_apurado": dec0(campo(p, 11)), "deducoes": dec0(campo(p, 12)),
+                "a_recolher": dec0(campo(p, 13)),
+                "saldo_credor_transportar": dec0(campo(p, 14)),
+                "debitos_especiais": dec0(campo(p, 15))})
+
+        elif reg == "E210":
+            # |E210|IND_MOV_ST|VL_SLD_CRED_ANT_ST|VL_DEVOL_ST|VL_RESSARC_ST|
+            #  VL_OUT_CRED_ST|VL_AJ_CREDITOS_ST|VL_RETENCAO_ST|VL_OUT_DEB_ST|
+            #  VL_AJ_DEBITOS_ST|VL_SLD_DEV_ANT_ST|VL_DEDUCOES_ST|VL_ICMS_RECOL_ST|
+            #  VL_SLD_CRED_ST_TRANSPORTAR|DEB_ESP_ST|
+            efd.apuracao.append({
+                "tributo": "st", "uf": uf_apur, "linha": n,
+                "movimento": campo(p, 2),
+                "saldo_credor_anterior": dec0(campo(p, 3)),
+                "creditos": dec0(campo(p, 4)) + dec0(campo(p, 5)) + dec0(campo(p, 6))
+                            + dec0(campo(p, 7)),
+                "debitos": dec0(campo(p, 8)),
+                "ajustes_debito": dec0(campo(p, 9)) + dec0(campo(p, 10)),
+                "saldo_apurado": dec0(campo(p, 11)), "deducoes": dec0(campo(p, 12)),
+                "a_recolher": dec0(campo(p, 13)),
+                "saldo_credor_transportar": dec0(campo(p, 14)),
+                "debitos_especiais": dec0(campo(p, 15))})
+
+        elif reg == "E310":
+            # |E310|IND_MOV_FCP_DIFAL|VL_SLD_CRED_ANT_DIFAL|VL_TOT_DEBITOS_DIFAL|
+            #  VL_OUT_DEB_DIFAL|VL_TOT_CREDITOS_DIFAL|VL_OUT_CRED_DIFAL|
+            #  VL_SLD_DEV_ANT_DIFAL|VL_DEDUCOES_DIFAL|VL_RECOL_DIFAL|
+            #  VL_SLD_CRED_TRANSPORTAR_DIFAL|DEB_ESP_DIFAL| e o mesmo para o FCP.
+            efd.apuracao.append({
+                "tributo": "difal", "uf": uf_apur, "linha": n,
+                "movimento": campo(p, 2),
+                "saldo_credor_anterior": dec0(campo(p, 3)),
+                "debitos": dec0(campo(p, 4)), "ajustes_debito": dec0(campo(p, 5)),
+                "creditos": dec0(campo(p, 6)), "ajustes_credito": dec0(campo(p, 7)),
+                "saldo_apurado": dec0(campo(p, 8)), "deducoes": dec0(campo(p, 9)),
+                "a_recolher": dec0(campo(p, 10)),
+                "saldo_credor_transportar": dec0(campo(p, 11)),
+                "debitos_especiais": dec0(campo(p, 12))})
+            efd.apuracao.append({
+                "tributo": "fcp", "uf": uf_apur, "linha": n,
+                "saldo_credor_anterior": dec0(campo(p, 13)),
+                "debitos": dec0(campo(p, 14)), "ajustes_debito": dec0(campo(p, 15)),
+                "creditos": dec0(campo(p, 16)), "ajustes_credito": dec0(campo(p, 17)),
+                "saldo_apurado": dec0(campo(p, 18)), "deducoes": dec0(campo(p, 19)),
+                "a_recolher": dec0(campo(p, 20)),
+                "saldo_credor_transportar": dec0(campo(p, 21)),
+                "debitos_especiais": dec0(campo(p, 22))})
+
+        elif reg == "E520":
+            # |E520|VL_SD_ANT_IPI|VL_DEB_IPI|VL_CRED_IPI|VL_OD_IPI|VL_OC_IPI|
+            #  VL_SC_IPI|VL_SD_IPI|
+            efd.apuracao.append({
+                "tributo": "ipi", "uf": efd.uf, "linha": n,
+                "saldo_credor_anterior": dec0(campo(p, 2)),
+                "debitos": dec0(campo(p, 3)), "creditos": dec0(campo(p, 4)),
+                "ajustes_debito": dec0(campo(p, 5)), "ajustes_credito": dec0(campo(p, 6)),
+                "saldo_credor_transportar": dec0(campo(p, 7)),
+                "a_recolher": dec0(campo(p, 8))})
 
         elif reg == "C170" and doc_atual is not None:
             # |C170|NUM_ITEM|COD_ITEM|DESCR_COMPL|QTD|UNID|VL_ITEM|VL_DESC|IND_MOV|CST_ICMS|CFOP|...

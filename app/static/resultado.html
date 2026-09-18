@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resultado contábil — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.bloco { margin-bottom: 28px; }
+.nota-rodape { font-size: 12.5px; color: var(--on-surface-variant); line-height: 1.6; margin: 10px 0 0; }
+td.lucro { color: var(--success-dark); font-weight: 700; }
+td.prejuizo { color: var(--error); font-weight: 700; }
+tr.sint td { font-weight: 600; background: var(--surface-low); }
+.pedir li { font-size: 14px; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Resultado contábil · lucro ou prejuízo pela ECD</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Estoque</a>
+    <a href="/mes">Mês</a>
+    <a href="/apuracao">Apuração</a>
+    <a class="on" href="/resultado">Resultado</a>
+    <a href="/importar">Importar</a>
+    <a href="/achados">Achados</a>
+    <a href="/relatorio">Relatório</a>
+    <a href="/manual">Manual</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <div id="sem-ecd" hidden>
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
+      <div class="lbl">Nenhuma ECD importada ainda</div>
+      <p style="margin:10px 0 6px;font-size:14px;line-height:1.6">
+        Lucro ou prejuízo depende de despesas que não estão em nota fiscal — folha,
+        aluguel, frete, juros. Estão na contabilidade. Esta tela lê a <b>ECD</b>
+        (SPED Contábil) e mostra o resultado mês a mês, a DRE e a receita
+        contábil confrontada com o faturamento das notas.
+      </p>
+      <div class="lbl" style="margin-top:14px">O que pedir ao contador</div>
+      <ul class="pedir">
+        <li><b>ECD de 2022 e de 2023</b>, o arquivo <code>.txt</code> transmitido.
+            Esses anos têm notas no sistema, e aí o contábil é confrontado com o fiscal.</li>
+        <li><b>Com balancetes mensais</b> — um período de saldos por mês. ECD com um
+            único saldo anual não mostra o resultado mês a mês.</li>
+        <li><b>Para 2026</b>, a ECD só é entregue em meados de 2027. Peça ao
+            contador que <b>exporte o arquivo no leiaute da ECD sem transmitir</b> —
+            a maioria dos sistemas contábeis faz — com os meses já fechados.</li>
+      </ul>
+      <div class="lbl" style="margin-top:14px">Como importar</div>
+      <p style="margin:6px 0 0;font-size:14px">
+        Na tela <a href="/importar">Importar</a>, arraste o <code>.txt</code> —
+        o sistema reconhece pelo conteúdo se é ECD ou EFD. Ou, pelo terminal:
+      </p>
+      <p class="mono" style="margin:8px 0 0;background:var(--surface-container);padding:10px 12px;border-radius:var(--r);font-size:13px">
+        python -m auditoria importar "C:\caminho\da\ECD.txt"
+      </p>
+    </div>
+  </div>
+
+  <div id="com-ecd" hidden>
+    <div class="card" style="margin-bottom:16px">
+      <div class="lbl">Período</div>
+      <div class="controls" style="margin:12px 0 0">
+        <input type="month" id="ini"> <span class="muted">até</span> <input type="month" id="fim">
+      </div>
+      <p class="nota-rodape">
+        Resultado do mês = créditos menos débitos das contas de resultado
+        analíticas, <b>sem os lançamentos de encerramento</b> — no fechamento, as
+        contas de resultado são zeradas contra o patrimônio líquido, e sem esse
+        desconto o mês de fechamento mostraria zero. Positivo é lucro.
+      </p>
+    </div>
+
+    <section class="grid kpis" id="kpis"></section>
+
+    <div class="bloco">
+      <h2 class="sec">Mês a mês</h2>
+      <div class="wrap"><table id="tbl-mes">
+        <thead><tr><th>Mês</th><th class="num">Receitas</th><th class="num">Custos e despesas</th>
+          <th class="num">Resultado</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="bloco">
+      <h2 class="sec">Receita contábil × faturamento das notas <small>receita de venda, bruta</small></h2>
+      <div class="wrap"><table id="tbl-rec">
+        <thead><tr><th>Mês</th><th class="num">Contabilidade</th><th class="num">Notas (XML)</th>
+          <th class="num">Diferença</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p class="nota-rodape" id="rec-nota"></p>
+    </div>
+
+    <div class="bloco">
+      <h2 class="sec">DRE <small>com a estrutura do plano de contas da empresa</small></h2>
+      <div class="controls" style="margin:0 0 10px">
+        <label style="font-size:13px"><input type="checkbox" id="todas"> mostrar todas as contas</label>
+      </div>
+      <div class="wrap"><table id="tbl-dre">
+        <thead><tr><th>Conta</th><th class="desc">Descrição</th><th>Referencial</th>
+          <th class="num">Valor no período</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="bloco">
+      <h2 class="sec">ECDs importadas</h2>
+      <div id="arquivos"></div>
+    </div>
+  </div>
+</main>
+
+<script src="/app.js"></script>
+<script>ligarSair(); ligarTrabalhos();</script>
+<script>
+const $ = id => document.getElementById(id);
+let ultimo = null;
+const mesBR = m => { const [a, mm] = String(m).split('-'); return `${mm}/${a}`; };
+
+function card(lbl, val, foot, cls) {
+  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+          <div class="val sm">${val}</div><div class="foot">${foot || ''}</div></div>`;
+}
+
+async function carregar() {
+  const q = new URLSearchParams();
+  if ($('ini').value) q.set('ini', $('ini').value);
+  if ($('fim').value) q.set('fim', $('fim').value);
+  let r;
+  try { r = await api('/api/resultado?' + q); } catch (e) { return falha(e); }
+  ultimo = r;
+  const tem = (r.arquivos || []).length > 0;
+  $('sem-ecd').hidden = tem;
+  $('com-ecd').hidden = !tem;
+  if (!tem) return;
+  if (!$('ini').value) $('ini').value = String(r.arquivos[0].dt_ini).slice(0, 7);
+  if (!$('fim').value) $('fim').value = String(r.arquivos[r.arquivos.length - 1].dt_fin).slice(0, 7);
+
+  const M = r.mensal || [];
+  const res = M.reduce((a, x) => a + +x.resultado, 0);
+  const rec = M.reduce((a, x) => a + (+x.receitas || 0), 0);
+  const des = M.reduce((a, x) => a + (+x.custos_despesas || 0), 0);
+  const lucro = M.filter(x => +x.resultado > 0).length;
+  $('kpis').innerHTML = [
+    card(res >= 0 ? 'Lucro no período' : 'Prejuízo no período', money(Math.abs(res)),
+         `${M.length} mês(es) com saldo na ECD`, res >= 0 ? 'good' : 'alert'),
+    card('Receitas', money(rec), 'créditos das contas de resultado'),
+    card('Custos e despesas', money(des), 'débitos das contas de resultado'),
+    card('Meses com lucro', `${lucro} de ${M.length}`,
+         M.length - lucro ? `${M.length - lucro} com prejuízo` : 'nenhum com prejuízo'),
+  ].join('');
+
+  fill('tbl-mes', M, x => `
+    <td class="mono">${mesBR(x.mes)}</td>
+    <td class="num">${money(x.receitas)}</td>
+    <td class="num">${money(x.custos_despesas)}</td>
+    <td class="num ${+x.resultado >= 0 ? 'lucro' : 'prejuizo'}">${money(x.resultado)}</td>
+    <td>${+x.resultado >= 0 ? '<span class="chip ok">lucro</span>' : '<span class="chip err">prejuízo</span>'}</td>`,
+    M.length ? `<tfoot><tr><td>Período</td><td class="num">${money(rec)}</td>
+      <td class="num">${money(des)}</td><td class="num">${money(res)}</td><td></td></tr></tfoot>` : '');
+
+  const R = r.receita || [];
+  fill('tbl-rec', R, x => `
+    <td class="mono">${mesBR(x.mes)}</td>
+    <td class="num">${money(x.receita_contabil)}</td>
+    <td class="num">${money(x.faturamento_notas)}</td>
+    <td class="num ${Math.abs(+x.diferenca) < 0.01 ? 'lucro' : 'prejuizo'}">${Math.abs(+x.diferenca) < 0.01 ? 'confere' : money(x.diferenca)}</td>`);
+  if (!R.length) $('tbl-rec').querySelector('tbody').innerHTML =
+    '<tr><td colspan="4" class="skel">nenhum mês com ECD e notas ao mesmo tempo</td></tr>';
+  const CR = r.contas_receita || [];
+  $('rec-nota').innerHTML = CR.length
+    ? `Contas consideradas receita de venda (confira o critério): ` +
+      CR.map(c => `<b class="mono">${esc(c.cod_cta)}</b> ${esc(c.nome)} <span class="muted">(${esc(c.criterio)})</span>`).join(' · ') +
+      `. Diferença pode ser nota não importada, venda sem nota, ou receita lançada em outra conta.`
+    : 'Nenhuma conta de receita de venda identificada — nem pelo plano referencial (3.01.01.01), nem pelo nome.';
+
+  desenhaDre();
+  $('arquivos').innerHTML = r.arquivos.map(a => `
+    <div class="card" style="margin-bottom:10px">
+      <div class="lbl">${esc(a.nome || '')} · CNPJ <span class="mono">${esc(a.cnpj)}</span> ·
+        ${brDate(a.dt_ini)} a ${brDate(a.dt_fin)}</div>
+      ${(a.problemas || []).map(p => `<div class="nota-rodape">! ${esc(p.detalhe)}</div>`).join('')}
+    </div>`).join('');
+}
+
+function desenhaDre() {
+  const D = (ultimo && ultimo.dre) || [];
+  const todas = $('todas').checked;
+  const vis = todas ? D : D.filter(x => +x.nivel <= 3);
+  fill('tbl-dre', vis, x => `
+    <td class="mono" style="padding-left:${8 + (+x.nivel - 1) * 18}px">${esc(x.cod_cta)}</td>
+    <td class="desc">${esc(x.nome)}</td>
+    <td class="mono muted">${esc(x.cod_cta_ref || '')}</td>
+    <td class="num ${+x.valor >= 0 ? 'lucro' : 'prejuizo'}">${money(x.valor)}</td>`);
+  document.querySelectorAll('#tbl-dre tbody tr').forEach((tr, i) => {
+    if (vis[i] && vis[i].ind_cta === 'S') tr.classList.add('sint');
+  });
+}
+
+$('ini').onchange = carregar;
+$('fim').onchange = carregar;
+$('todas').onchange = desenhaDre;
+carregar();
+</script>
+</body>
+</html>
