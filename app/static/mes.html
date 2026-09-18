@@ -218,6 +218,9 @@ async function carregar() {
     <td class="mono">${esc(x.cod_item)}</td>
     <td class="desc">${x.descr_item ? esc(x.descr_item)
         : '<span class="muted">sem cadastro</span>'}
+      ${x.origem_cadastro === 'NF-e'
+        ? ' <span class="chip" title="Item fora do cadastro 0200: descrição, NCM e '
+          + 'unidade foram lidos do XML automaticamente">cadastro pelo XML</span>' : ''}
       ${x.sem_custo ? ' <span class="chip warn">sem custo</span>' : ''}</td>
     <td>${esc(x.unid || '—')}</td>
     <td class="num ${+x.qtd_entrada ? 'ent' : ''}">${+x.qtd_entrada ? n(x.qtd_entrada) : '—'}</td>

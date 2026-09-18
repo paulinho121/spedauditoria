@@ -168,8 +168,8 @@ async function carregar() {
     <td class="num">${n(r.movimentos)}</td>
     <td class="mono">${brDate(r.ultima_mov)}</td>
     <td>${r.origem_cadastro === 'NF-e'
-        ? '<span class="chip warn" title="Item criado depois do momento zero: '
-          + 'descrição veio da nota, não do cadastro 0200">NF-e</span>'
+        ? '<span class="chip warn" title="Item fora do cadastro 0200: descrição, '
+          + 'NCM e unidade foram cadastrados automaticamente a partir do XML">XML</span>'
         : r.origem_cadastro === 'sem cadastro'
         ? '<span class="chip err">sem cadastro</span>'
         : `<span class="muted" style="font-size:11px">${esc(r.origem_cadastro || '')}</span>`}</td>`);

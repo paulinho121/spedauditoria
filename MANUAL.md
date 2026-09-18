@@ -256,6 +256,23 @@ painel. A tela Importar lista os itens sem correspondência e sugere candidatos
 do cadastro, mas **ainda não tem como confirmar o de-para** — isso está por
 fazer.
 
+### Item que não está no cadastro 0200
+
+O cadastro 0200 do EFD só conhece os itens que existiam quando o arquivo foi
+gerado. Item criado depois ganha cadastro **automaticamente, a partir do XML**:
+descrição, NCM, CEST, código de barras e unidade da nota em que ele aparece.
+Acontece no momento em que o item ganha o primeiro movimento, qualquer que seja
+o caminho da importação.
+
+Quando o item aparece em várias notas, vale a que a própria filial emitiu — é a
+descrição dela — e, entre essas, a mais antiga. A escolha sai dos dados, não da
+ordem em que os arquivos foram importados.
+
+Esse cadastro fica **separado** do 0200 e nunca o substitui: quando o item
+existe no 0200, o 0200 vence. Na tela, o item cadastrado pelo XML vem marcado
+*cadastro pelo XML* (ou *XML*, na tela Estoque), para não ser confundido com
+o que a empresa declarou.
+
 ### Transferência entre filiais
 
 Uma nota de transferência gera dois lançamentos: a **saída** em quem emitiu e a
