@@ -360,6 +360,22 @@ Remessa entre filiais (conserto, demonstração, armazém) não gera entrada no
 destino: a mercadoria troca de mão sem trocar de dono, e a saída já registra a
 mudança de posse.
 
+### Nota complementar, nota de ajuste e CFOP 5949/6949
+
+**Nota complementar** (finalidade 2) só completa valor ou imposto de uma nota
+anterior — a mercadoria já se movimentou na original. **Nota de ajuste**
+(finalidade 3) corrige escrituração. Nenhuma das duas movimenta estoque,
+**qualquer que seja o CFOP e mesmo que venha com quantidade**. A regra olha a
+finalidade da nota antes do CFOP.
+
+A nota complementar de valor continua contando no **faturamento**: é preço
+cobrado do cliente.
+
+**5949 e 6949** (outras saídas não especificadas) não movimentam estoque, por
+decisão do auditor. Atenção ao efeito disso: em importação **por conta e
+ordem**, a trading costuma remeter a mercadoria à empresa com 5949 — e essa
+nota é a única entrada da mercadoria no estoque.
+
 ### Equipamento de cliente em conserto
 
 O equipamento que o cliente manda para conserto **é dele**, e não entra no seu
