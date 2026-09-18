@@ -78,6 +78,19 @@ def payload_nfe(caminho, quem=None):
     }, pnfe.confere(d)
 
 
+def payload_evento(caminho, quem=None):
+    """Evento avulso (-can.xml) para `registrar_evento`."""
+    ev = pnfe.parse_evento(caminho)
+    quem = quem or os.environ.get("AUDITOR") or getpass.getuser()
+    return {
+        "chave": ev.chave, "tp_evento": ev.tp_evento, "n_seq": ev.n_seq,
+        "descricao": ev.descricao, "dh_evento": ev.dh_evento, "cnpj": ev.cnpj,
+        "c_stat": ev.c_stat, "protocolo": ev.protocolo,
+        "justificativa": ev.justificativa, "nome_arquivo": ev.nome_arquivo,
+        "sha256": ev.sha256, "importado_por": quem,
+    }, ev
+
+
 def como_texto(p):
     """JSON pronto para ir no corpo da chamada."""
     return json.dumps(p, default=_json, ensure_ascii=False)

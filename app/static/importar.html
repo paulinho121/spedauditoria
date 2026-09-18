@@ -408,22 +408,58 @@ async function enviar(arquivos) {
   linha(`Lendo ${xmls.length} arquivo(s)…`, 'mut');
   $('prog').hidden = false;
 
+  // Um lote que falhava interrompia o laço inteiro: os lotes seguintes nunca
+  // saíam do navegador, e a tela não dizia quais arquivos tinham ficado de fora.
+  // Aconteceu com uma pasta de 249 XML, dos quais 201 nunca chegaram.
+  //
+  // Agora cada lote é tentado de novo — o servidor local reinicia sozinho quando
+  // o código muda, e um lote enviado nesse intervalo falha à toa. Reenviar é
+  // seguro: a importação reconhece o que já entrou pelo conteúdo do arquivo.
   const LOTE = 40;
+  const ESPERAS = [0, 2000, 6000, 15000];
+  const naoEnviados = [];
   for (let i = 0; i < xmls.length; i += LOTE) {
     const parte = xmls.slice(i, i + LOTE);
     const payload = await Promise.all(parte.map(async f => ({
       nome: f.name, conteudo: await f.text()
     })));
     linha(`Enviando ${i + 1}–${i + parte.length} de ${xmls.length}…`, 'mut');
-    const r = await fetch('/api/import/upload', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ arquivos: payload })
-    }).then(x => x.json());
-    mostraResultado(r);
+    let r = null, ultimoErro = null;
+    for (const espera of ESPERAS) {
+      if (espera) {
+        linha(`  falhou (${ultimoErro}); tentando de novo em ${espera / 1000}s…`, 'warn');
+        await new Promise(ok => setTimeout(ok, espera));
+      }
+      try {
+        const resp = await fetch('/api/import/upload', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ arquivos: payload })
+        });
+        const j = await resp.json();
+        if (!resp.ok || j.erro) throw new Error(j.erro || 'HTTP ' + resp.status);
+        r = j;
+        break;
+      } catch (e) {
+        ultimoErro = e.message;
+      }
+    }
+    if (r) {
+      mostraResultado(r);
+    } else {
+      naoEnviados.push(...parte.map(f => f.name));
+      linha(`  lote ${i + 1}–${i + parte.length} NÃO foi importado: ${ultimoErro}`, 'err');
+    }
     $('prog').value = Math.round((i + parte.length) / xmls.length * 100);
   }
   $('prog').hidden = true;
-  linha('Concluído.', 'ok');
+  if (naoEnviados.length) {
+    linha(`${naoEnviados.length} de ${xmls.length} arquivo(s) NÃO foram importados. ` +
+          `Envie de novo os mesmos arquivos: o que já entrou é reconhecido e pulado.`, 'err');
+    naoEnviados.slice(0, 30).forEach(n => linha('    ' + n, 'err'));
+    if (naoEnviados.length > 30) linha(`    … e mais ${naoEnviados.length - 30}`, 'err');
+  } else {
+    linha(`Concluído: os ${xmls.length} arquivo(s) foram processados.`, 'ok');
+  }
 }
 
 const drop = $('drop');

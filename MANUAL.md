@@ -125,6 +125,35 @@ preservando o histórico.
 Cada arquivo é gravado em uma única operação, dentro de uma transação. Se algo
 falhar no meio, nada daquele arquivo entra.
 
+A mesma nota costuma existir em arquivos diferentes — cada sistema exporta com
+um envelope ou uma formatação. O sistema compara a **nota**, campo a campo, e
+não o arquivo: mesma nota em outro arquivo aparece como *já importada*. Só
+**conflito** quando algum dado fiscal difere de fato (valor, quantidade, item,
+CFOP) — e aí vale investigar, porque uma NF-e autorizada não muda.
+
+**Confira o fim do log.** O navegador envia os arquivos em lotes de 40. Se um
+lote falha, ele tenta de novo algumas vezes; se ainda assim não conseguir, a
+última linha diz **quantos e quais arquivos não foram importados**. Nesse caso
+basta enviar a mesma seleção de novo — o que já entrou é reconhecido e pulado.
+
+Para pastas grandes, o botão *Importar pasta* (só no servidor local) é mais
+seguro que arrastar: lê direto do disco, sem passar pelo navegador.
+
+### Notas canceladas
+
+O sistema emissor costuma exportar a nota cancelada só como **evento**, num
+arquivo `-can.xml`, sem o XML original. Importe esses arquivos junto com os
+demais: o sistema os reconhece.
+
+- Se a nota já estiver no sistema, ela passa a **cancelada** e os movimentos
+  dela saem do estoque.
+- Se ainda não estiver, o cancelamento fica guardado, e a nota **já entra
+  cancelada** quando for importada.
+
+Vale a resposta da SEFAZ gravada no arquivo, não o pedido: um pedido de
+cancelamento recusado não cancela nada. A nota e o evento continuam no sistema
+como prova, com arquivo e protocolo.
+
 ### O que observar depois de importar
 
 Dois cartões travam o trabalho se estiverem acima de zero:

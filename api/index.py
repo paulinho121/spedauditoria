@@ -440,7 +440,7 @@ def importar_upload(corpo):
     _sobe_auditoria()
     import tempfile
     from collections import Counter
-    from auditoria import carga_json
+    from auditoria import carga_json, nfe as pnfe
 
     pasta = tempfile.mkdtemp(prefix="fs_")
     saida = []
@@ -454,7 +454,13 @@ def importar_upload(corpo):
         try:
             with open(caminho, "w", encoding=cod, errors="replace", newline="") as fh:
                 fh.write(arq.get("conteudo") or "")
-            if nome.lower().endswith(".xml"):
+            if nome.lower().endswith(".xml") and pnfe.e_evento(caminho):
+                # Cancelamento avulso: sem isto caía em "ignorado" por não ter
+                # infNFe, e a nota cancelada seguia no estoque.
+                payload, _ev = carga_json.payload_evento(caminho)
+                r = chama_rpc("registrar_evento", payload)
+                probs = []
+            elif nome.lower().endswith(".xml"):
                 payload, probs = carga_json.payload_nfe(caminho)
                 r = chama_rpc("importar_nfe", payload)
             else:

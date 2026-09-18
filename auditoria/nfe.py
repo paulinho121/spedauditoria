@@ -219,6 +219,77 @@ def parse(caminho):
     return nfe
 
 
+# cStat do retorno do evento que significa "vale": registrado e vinculado à
+# NF-e (135), ou cancelamento aceito fora de prazo (155). 136 é "registrado,
+# mas não vinculado" — a SEFAZ não achou a nota, e o evento não a cancela.
+CSTAT_EVENTO_VALIDO = {"135", "155"}
+
+
+@dataclass
+class EventoNFe:
+    caminho: str
+    nome_arquivo: str
+    sha256: str
+    chave: str = ""
+    tp_evento: str = ""
+    descricao: str = ""
+    n_seq: int = 1
+    dh_evento: datetime = None
+    cnpj: str = ""
+    c_stat: str = ""
+    protocolo: str = ""
+    justificativa: str = ""
+
+    @property
+    def cancela(self):
+        return (self.tp_evento in TP_EVENTO_CANCELAMENTO
+                and self.c_stat in CSTAT_EVENTO_VALIDO)
+
+
+def e_evento(caminho):
+    """
+    O arquivo é um evento avulso (procEventoNFe), e não uma nota?
+
+    O emissor exporta a nota cancelada só como evento, num -can.xml separado, sem
+    o -nfe.xml original. parse() recusa esse arquivo por não ter infNFe — e o
+    cancelamento se perdia como "arquivo ignorado".
+    """
+    with open(caminho, "rb") as fh:
+        cabeca = fh.read(3000).decode("utf-8", "ignore")
+    return "<infEvento" in cabeca and "<infNFe" not in cabeca
+
+
+def parse_evento(caminho):
+    import xml.etree.ElementTree as ET
+
+    ev = EventoNFe(caminho=caminho, nome_arquivo=os.path.basename(caminho),
+                   sha256=sha256(caminho))
+    raiz = ET.parse(caminho).getroot()
+    inf = raiz.find(".//n:evento/n:infEvento", NS)
+    if inf is None:
+        inf = raiz.find(".//n:infEvento", NS)
+    if inf is None:
+        raise ValueError(f"{ev.nome_arquivo}: não contém infEvento — não é um evento.")
+
+    ev.chave = _txt(inf, "n:chNFe")
+    ev.tp_evento = _txt(inf, "n:tpEvento")
+    ev.n_seq = int(_txt(inf, "n:nSeqEvento") or 1)
+    ev.cnpj = _txt(inf, "n:CNPJ")
+    ev.descricao = _txt(inf, "n:detEvento/n:descEvento")
+    ev.justificativa = _txt(inf, "n:detEvento/n:xJust")
+    dh = _txt(inf, "n:dhEvento")
+    if dh:
+        ev.dh_evento = datetime.fromisoformat(dh)
+
+    # O que vale é o RETORNO da SEFAZ, não o pedido: um pedido de cancelamento
+    # recusado continua sendo um arquivo com tpEvento 110111.
+    ret = raiz.find(".//n:retEvento/n:infEvento", NS)
+    if ret is not None:
+        ev.c_stat = _txt(ret, "n:cStat")
+        ev.protocolo = _txt(ret, "n:nProt")
+    return ev
+
+
 def confere(nfe, nossos_cnpjs=()):
     """Problemas que só dependem do arquivo."""
     probs = []
