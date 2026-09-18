@@ -182,6 +182,11 @@ def sql_periodo(mes, uf, termo, limit, offset, ordem, situacao="", origem="nfe")
             f"limit {int(limit)} offset {int(offset)}")
 
 
+def sql_periodo_bloqueios(mes):
+    ini, fim = _mes(mes, "2023-01")
+    return f"select * from periodo_bloqueios({ini}, {fim})"
+
+
 def sql_periodo_resumo(mes, origem="nfe"):
     ini, fim = _mes(mes, "2023-01")
     org = origem if origem in ("nfe", "") else "nfe"
@@ -460,6 +465,8 @@ ROUTES = {
         (qs.get("origem") or ["nfe"])[0])),
     "/api/periodo/resumo": lambda qs: query(sql_periodo_resumo(
         (qs.get("mes") or [""])[0], (qs.get("origem") or ["nfe"])[0]))[0],
+    "/api/periodo/bloqueios": lambda qs: query(
+        sql_periodo_bloqueios((qs.get("mes") or [""])[0])),
     "/api/periodo/meses": lambda qs: query(
         "select mes, primeiro_dia::text, ultimo_dia::text, movimentos, "
         "       movimentos_nfe, filiais, itens "

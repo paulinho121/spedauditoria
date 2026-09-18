@@ -77,6 +77,103 @@ function ligarSair() {
   });
 }
 
+/* ------------------------------------------------- ficha do item (Kardex)
+ * Vive aqui, e não na tela, porque duas telas abrem a mesma ficha: a posição
+ * acumulada e a movimentação do mês. Duplicada, divergiria na primeira
+ * correção que alguém fizesse só num lado.
+ */
+const NAT = {
+  abertura: 'abertura', transferencia: 'transferência', posse: 'muda de posse',
+  entrada: 'entrada', saida: 'saída', simbolico: 'simbólico',
+};
+
+function cardF(lbl, val, cls) {
+  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+          <div class="val sm">${val}</div></div>`;
+}
+
+/**
+ * Abre a ficha do item num painel, sem sair da tela.
+ *
+ * `ate` é a data limite do Kardex. `nota` é um aviso opcional no topo: quem
+ * chega pela tela do mês precisa saber que o histórico aqui é o completo,
+ * inclusive o que veio antes do mês — é justamente isso que explica um saldo
+ * negativo lá.
+ */
+async function abrirFicha(item, ate, nota) {
+  const { corpo } = abrirPainel(
+    esc(item.descr_item || item.cod_item),
+    `${chipUF(item.uf)} código <b class="mono">${esc(item.cod_item)}</b> · ` +
+    `NCM <span class="mono">${esc(item.ncm || '—')}</span> · posição em ${brDate(ate)}`);
+  let mov;
+  try {
+    mov = await api(`/api/kardex?cnpj=${encodeURIComponent(item.cnpj)}` +
+                    `&item=${encodeURIComponent(item.cod_item)}&ate=${ate}`);
+  } catch (e) {
+    corpo.innerHTML = `<div class="err-box">Não consegui carregar a ficha.<br>${esc(e.message)}</div>`;
+    return;
+  }
+  if (!mov.length) {
+    corpo.innerHTML = '<div class="skel">Nenhum movimento até esta data.</div>';
+    return;
+  }
+
+  const ult = mov[mov.length - 1];
+  const totalEnt = mov.reduce((a, m) => a + (+m.entrada || 0), 0);
+  const totalSai = mov.reduce((a, m) => a + (+m.saida || 0), 0);
+
+  corpo.innerHTML = `
+    ${nota ? `<div class="motivo">${nota}</div>` : ''}
+    <section class="grid kpis" style="margin-bottom:16px">
+      ${cardF('Saldo em ' + brDate(ate), n(ult.saldo_qtd), (+ult.saldo_qtd < 0 ? 'alert' : ''))}
+      ${cardF('Custo médio', money(ult.custo_medio))}
+      ${cardF('Valor', money(ult.saldo_valor), (+ult.saldo_valor < 0 ? 'alert' : ''))}
+      ${cardF('Entradas', n(totalEnt))}
+      ${cardF('Saídas', n(totalSai))}
+      ${cardF('Em terceiros', n(ult.saldo_terceiros))}
+    </section>
+    <div class="wrap">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Data</th><th>Documento</th><th>Movimento</th>
+          <th>CFOP</th><th class="desc">Contraparte</th>
+          <th class="num">Entrada</th><th class="num">Saída</th>
+          <th class="num">Vl. unit.</th><th class="num">Saldo</th>
+          <th class="num">Custo médio</th><th class="num">Valor</th>
+        </tr></thead>
+        <tbody>${mov.map(m => `<tr>
+          <td class="mono">${m.seq}</td>
+          <td class="mono">${brDate(m.dt)}</td>
+          <td class="mono">${m.num_nf ? esc(m.num_nf) + '/' + esc(m.serie || '') : '<span class="muted">abertura</span>'}</td>
+          <td><span class="nat nat-${m.natureza_mov}" title="${
+              esc(m.natureza || '')}">${NAT[m.natureza_mov] || m.natureza_mov}</span></td>
+          <td class="mono" title="${esc(m.cfop_descr || '')}">${esc(m.cfop || '—')}</td>
+          <td class="desc">${m.interna
+              ? chipUF(m.contraparte_uf) + ' <span class="muted">' +
+                esc((m.contraparte || '').slice(0, 26)) + '</span>'
+              : esc((m.contraparte || '—').slice(0, 34))}</td>
+          <td class="num ent">${m.entrada ? n(m.entrada) : ''}</td>
+          <td class="num sai">${m.saida ? n(m.saida) : ''}</td>
+          <td class="num">${m.vl_unit_mov ? money(m.vl_unit_mov) : '—'}</td>
+          <td class="num"><b>${+m.saldo_qtd < 0
+              ? `<span class="chip err">${n(m.saldo_qtd)}</span>` : n(m.saldo_qtd)}</b></td>
+          <td class="num">${money(m.custo_medio)}</td>
+          <td class="num">${money(m.saldo_valor)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:12px">
+      O saldo e o custo médio são corridos: cada linha mostra a posição depois
+      daquele movimento. Saídas baixam pelo custo médio vigente — a coluna
+      Vl. unit. numa venda é o preço da nota, não o custo.
+      <br><b>Transferência</b> é movimento entre filiais do próprio grupo, e a
+      sigla mostra qual. <b>Muda de posse</b> não altera o patrimônio: a
+      mercadoria sai do seu poder e continua sendo sua — é o caso da remessa
+      para armazém geral e da remessa em locação.
+    </p>`;
+}
+
+
 /* ------------------------------------------------------------ trabalhos
  * Cada auditoria é um trabalho, e o painel inteiro mostra um por vez. O
  * seletor fica no cabeçalho de todas as telas porque a pergunta "de qual

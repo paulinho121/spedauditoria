@@ -309,6 +309,9 @@ ROTAS = {
     "/api/periodo": rota_periodo,
     "/api/periodo/resumo": lambda qs: um(consulta_rest(
         "rpc/estoque_periodo_resumo", _periodo_params(qs))),
+    "/api/periodo/bloqueios": lambda qs: consulta_rest(
+        "rpc/periodo_bloqueios",
+        dict(zip(("p_ini", "p_fim"), _mes(qs)))),
     "/api/periodo/meses": lambda qs: consulta_rest(
         "v_meses_movimento", {"order": "mes.desc"}),
 }

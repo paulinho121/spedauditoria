@@ -88,9 +88,16 @@ td.neg { color: var(--error); font-variant-numeric: tabular-nums; }
     </p>
   </div>
 
-  <div id="aviso-entradas" hidden class="card alert" style="margin-bottom:16px">
-    <div class="lbl">Quase não há entradas neste mês</div>
-    <p style="margin:8px 0 0;font-size:14px" id="aviso-entradas-txt"></p>
+  <div id="bloqueios" hidden class="card alert" style="margin-bottom:16px">
+    <div class="lbl">Notas do mês que não chegaram ao estoque</div>
+    <p style="margin:8px 0 10px;font-size:14px" id="bloqueios-txt"></p>
+    <div class="wrap">
+      <table id="tbl-bloq">
+        <thead><tr><th>Motivo</th><th class="num">Linhas</th><th class="num">Notas</th>
+          <th class="num">Qtd</th><th class="num">Valor</th><th>Onde resolver</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 
   <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
@@ -142,11 +149,12 @@ async function carregar() {
   if (!mes) return;
   $('rot-mes').textContent = rotuloMes(mes);
 
-  let linhas, r;
+  let linhas, r, bloq;
   try {
-    [linhas, r] = await Promise.all([
+    [linhas, r, bloq] = await Promise.all([
       api('/api/periodo?' + params()),
-      api('/api/periodo/resumo?mes=' + mes)
+      api('/api/periodo/resumo?mes=' + mes),
+      api('/api/periodo/bloqueios?mes=' + mes)
     ]);
   } catch (e) { return falha(e); }
 
@@ -164,19 +172,41 @@ async function carregar() {
       : card('Saída sem custo', '0', 'toda saída tem entrada que a lastreia', 'good'),
   ].join('');
 
-  // Um mes so de saidas nao e um mes: e um lote de XML incompleto. Vale dizer
-  // antes que o auditor tire conclusao do saldo.
-  const av = $('aviso-entradas');
-  if (+r.itens > 0 && +r.sem_custo / +r.itens > 0.5) {
-    av.hidden = false;
-    $('aviso-entradas-txt').innerHTML =
-      `<b>${n(r.sem_custo)} dos ${n(r.itens)} itens</b> tiveram saída sem nenhuma ` +
-      `entrada no mês. Entraram ${n(r.qtd_entrada)} unidades contra ` +
-      `${n(r.qtd_saida)} que saíram. Se você esperava um mês equilibrado, ` +
-      `provavelmente faltam os XML de entrada — confira na tela Importar antes ` +
-      `de concluir qualquer coisa a partir do saldo.`;
+  // Um mês só de saídas quase nunca é um mês: é nota que foi importada e não
+  // chegou ao estoque. A primeira versão desta tela deduzia isso da proporção
+  // entre entrada e saída — acertava o sintoma e não dizia a causa. Agora a
+  // causa é medida nota a nota, e cada motivo diz onde se resolve.
+  const MOTIVO = {
+    item_sem_depara: 'Item sem correspondência no cadastro',
+    cfop_sem_classificacao: 'CFOP sem classificação',
+    nota_nao_autorizada: 'Nota não autorizada (cancelada ou denegada)',
+    fora_do_grupo: 'Nenhum estabelecimento auditado é parte',
+  };
+  const cx = $('bloqueios');
+  const tratavel = (bloq || []).filter(
+    b => b.motivo === 'item_sem_depara' || b.motivo === 'cfop_sem_classificacao');
+  if (bloq && bloq.length) {
+    cx.hidden = false;
+    const linhasBloq = bloq.reduce((a, b) => a + +b.linhas, 0);
+    const valorBloq = tratavel.reduce((a, b) => a + +b.valor, 0);
+    $('bloqueios-txt').innerHTML =
+      `<b>${n(linhasBloq)} linhas de nota</b> deste mês foram importadas mas não ` +
+      `geraram movimento, então não estão no saldo abaixo.` +
+      (tratavel.length
+        ? ` <b>${money(valorBloq)}</b> disso depende só de você — o sistema não ` +
+          `adivinha o que não foi dito, e preferir o furo visível a um número ` +
+          `inventado é proposital. Resolva na tela <a href="/importar">Importar</a> ` +
+          `e o saldo se refaz sozinho.`
+        : '');
+    fill('tbl-bloq', bloq, b => `
+      <td>${esc(MOTIVO[b.motivo] || b.motivo)}</td>
+      <td class="num">${n(b.linhas)}</td>
+      <td class="num">${n(b.notas)}</td>
+      <td class="num">${n(b.quantidade)}</td>
+      <td class="num"><b>${money(b.valor)}</b></td>
+      <td>${esc(b.onde_tratar)}</td>`);
   } else {
-    av.hidden = true;
+    cx.hidden = true;
   }
 
   const total = linhas.length ? +linhas[0].total_geral : 0;
@@ -202,17 +232,21 @@ async function carregar() {
   $('ant').disabled = offset === 0;
   $('prox').disabled = offset + LIM >= total;
 
-  // A ficha completa do item continua na Reconstrução: ali o Kardex mostra
-  // tambem o que veio antes do mes, que e o que explica o saldo negativo.
+  // A ficha abre aqui mesmo. A primeira versão mandava para a tela de
+  // Reconstrução, que não recebe item por querystring: o clique só trocava de
+  // página e deixava o usuário perdido.
+  const [ano, mm] = mes.split('-');
+  const ultimoDia = new Date(+ano, +mm, 0).toISOString().slice(0, 10);
   document.querySelectorAll('#tbl tbody tr').forEach((tr, i) => {
     const x = linhas[i];
     if (!x) return;
     tr.classList.add('clicavel');
-    tr.title = 'Abrir a ficha completa do item na Reconstrução';
-    tr.onclick = () => {
-      location.href = '/reconstrucao?item=' + encodeURIComponent(x.cod_item)
-                    + '&cnpj=' + encodeURIComponent(x.cnpj);
-    };
+    tr.title = 'Abrir a ficha do item';
+    tr.onclick = () => abrirFicha(x, ultimoDia,
+      `Esta ficha é o <b>histórico completo</b> do item até ${brDate(ultimoDia)}, ` +
+      `não apenas ${rotuloMes(mes)}: inclui o saldo de abertura e os meses ` +
+      `anteriores. É aqui que se vê de onde veio — ou não veio — o estoque que ` +
+      `o mês consumiu.`);
   });
 }
 

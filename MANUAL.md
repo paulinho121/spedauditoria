@@ -239,9 +239,31 @@ explica um saldo negativo.
 
 Nada desta tela alimenta o motor de achados, justamente por isso.
 
-Se a maior parte dos itens aparecer como *sem custo*, a tela avisa. Quase
-sempre significa que faltam os XML de **entrada** daquele mês — confira na tela
-Importar antes de concluir qualquer coisa a partir do saldo.
+### Quando o mês aparece só com saídas
+
+Quase nunca é o sistema errando: é nota que foi importada e **não chegou ao
+estoque**. O painel *Notas do mês que não chegaram ao estoque* mostra quantas
+linhas pararam e por quê:
+
+| Motivo | O que significa | Onde resolver |
+|---|---|---|
+| **Item sem correspondência** | O código do produto na nota é do fornecedor e ainda não foi ligado a um item seu | Importar |
+| **CFOP sem classificação** | O sistema não sabe o efeito daquele CFOP no estoque | Importar |
+| **Nota não autorizada** | Cancelada ou denegada — não existe para o estoque | nada a fazer |
+| **Nenhum estabelecimento auditado é parte** | A nota não envolve nenhum CNPJ do trabalho | nada a fazer |
+
+As duas primeiras dependem só de você, e o valor delas aparece no painel.
+Resolvidas na tela Importar, o saldo se refaz sozinho — não é preciso
+reimportar nada.
+
+O sistema recusa gerar o movimento nesses casos de propósito. Um Kardex com
+furo visível é auditável; um com número adivinhado, não.
+
+Há ainda um caso que nenhum painel resolve: **as notas de entrada podem
+simplesmente não estar no lote**. O arquivo XML que a empresa exporta costuma
+conter apenas o que ela **emitiu** — as compras são documentos de terceiros e
+precisam ser obtidas à parte, na distribuição de DF-e da SEFAZ. Se o painel de
+bloqueios estiver limpo e ainda assim faltarem entradas, é por aí.
 
 O custeio é o mesmo do resto do sistema: média ponderada móvel, saída baixando
 pelo custo. Um método diferente só nesta tela criaria dois números para a mesma
