@@ -210,6 +210,43 @@ contraparte, CFOP e saldo corrido. É onde se vê em que data exata o saldo furo
 
 Cada filial tem cor própria — índigo para SP, teal para CE, magenta para SC.
 
+### Reconstruir um mês do zero
+
+Tela **Mês**. Responde a outra pergunta: *o que este mês fez com o estoque?*
+Todo item começa em **zero**, entram apenas as notas do mês, e o que sobra no
+fim é o saldo. Nenhum saldo de abertura participa.
+
+Serve quando não há inventário confiável para ancorar a reconstrução — ou
+quando ele existe e você quer justamente conferi-lo contra o movimento, sem que
+o próprio inventário entre na conta.
+
+Escolha o mês no seletor. Os botões abaixo mostram os meses que têm notas, com
+a quantidade de movimentos, para você não ter de adivinhar onde há o que ver.
+
+A tabela traz, por item: quanto **entrou**, quanto **saiu**, o **saldo no fim
+do mês**, o custo médio e o valor. Clicar numa linha leva à ficha completa do
+item na tela Estoque, que mostra também o que veio antes do mês — é lá que se
+explica um saldo negativo.
+
+**Duas leituras mudam por causa do zero inicial, e vale ter isto claro:**
+
+- **Saldo negativo aqui é esperado, não é achado.** Item vendido no mês e
+  comprado antes dele começa em zero e termina negativo. Isso é exatamente o
+  que a tela revela: quanto o mês consumiu de estoque anterior.
+- **Saída sem entrada no período não tem custo em que se apoiar.** O custo não
+  é zero — é desconhecido. Esses itens vêm marcados *sem custo* e a valoração
+  do mês não os inclui.
+
+Nada desta tela alimenta o motor de achados, justamente por isso.
+
+Se a maior parte dos itens aparecer como *sem custo*, a tela avisa. Quase
+sempre significa que faltam os XML de **entrada** daquele mês — confira na tela
+Importar antes de concluir qualquer coisa a partir do saldo.
+
+O custeio é o mesmo do resto do sistema: média ponderada móvel, saída baixando
+pelo custo. Um método diferente só nesta tela criaria dois números para a mesma
+mercadoria.
+
 ---
 
 ## 7. Levantar e tratar os achados

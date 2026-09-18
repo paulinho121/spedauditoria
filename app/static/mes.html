@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reconstrução do mês — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+/* Mesmos atalhos de data da tela de Reconstrução, que os define inline. */
+.datas { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.datas button { padding: 5px 11px; font-size: 12px; font-family: var(--mono); }
+.datas button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+/* Saldo negativo no fim do mês. Aqui é informação, não erro — por isso o
+   vermelho fica só no número, sem fundo de alerta como nos cards. */
+td.neg { color: var(--error); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Movimentação de <span class="mono" id="rot-mes">…</span> · todo item começa em zero</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Reconstrução</a>
+    <a class="on" href="/mes">Mês</a>
+    <a href="/importar">Importar</a>
+    <a href="/achados">Achados</a>
+    <a href="/relatorio">Relatório</a>
+    <a href="/manual">Manual</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="lbl">Mês a reconstruir</div>
+    <div class="controls" style="margin:12px 0 0">
+      <input type="month" id="mes">
+      <input type="search" id="q" placeholder="Descrição, código do item ou NCM…"
+             autocomplete="off">
+      <select id="uf">
+        <option value="">Todas as filiais</option>
+        <option value="SP">● SP — 05502390000383</option>
+        <option value="CE">● CE — 05502390000111</option>
+        <option value="SC">● SC — 05502390000200</option>
+      </select>
+      <select id="situacao">
+        <option value="">Todos os itens do mês</option>
+        <option value="negativo">Saldo negativo no fim do mês</option>
+        <option value="positivo">Saldo positivo no fim do mês</option>
+        <option value="zerado">Entrou e saiu tudo (saldo zero)</option>
+        <option value="so_entrada">Só entrada</option>
+        <option value="so_saida">Só saída</option>
+        <option value="sem_custo">Saída sem custo que a lastreie</option>
+      </select>
+      <select id="ordem">
+        <option value="valor">Maior valor</option>
+        <option value="saldo">Saldo mais negativo</option>
+        <option value="entrada">Maior entrada</option>
+        <option value="saida">Maior saída</option>
+        <option value="codigo">Código do item</option>
+      </select>
+      <button id="limpar">Limpar</button>
+    </div>
+    <div class="foot muted" style="margin-top:10px">
+      Entram apenas as notas do mês, com todo item partindo de zero. O custeio é
+      o mesmo do resto do sistema — média ponderada móvel, saída baixando pelo
+      custo, nunca pelo valor da nota.
+    </div>
+    <div class="datas" id="meses"></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
+    <div class="lbl">Como ler esta tela</div>
+    <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
+      Começar do zero muda o significado de duas colunas.
+      <b>Saldo negativo aqui é esperado</b>, não é achado: significa que o mês
+      consumiu estoque que já existia antes dele. É justamente o que esta visão
+      mostra. E <b>saída sem entrada no período não tem custo em que se apoiar</b> —
+      o custo não é zero, é desconhecido. Esses itens vêm marcados
+      <span class="chip warn">sem custo</span> e a valoração do mês não os inclui.
+      Nada desta tela alimenta o motor de achados.
+    </p>
+  </div>
+
+  <div id="aviso-entradas" hidden class="card alert" style="margin-bottom:16px">
+    <div class="lbl">Quase não há entradas neste mês</div>
+    <p style="margin:8px 0 0;font-size:14px" id="aviso-entradas-txt"></p>
+  </div>
+
+  <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
+
+  <div class="wrap" style="margin-top:16px">
+    <table id="tbl">
+      <thead><tr>
+        <th>UF</th><th>Código</th><th class="desc">Descrição</th><th>Un.</th>
+        <th class="num">Entrou</th><th class="num">Valor entrada</th>
+        <th class="num">Saiu</th><th class="num">Valor saída</th>
+        <th class="num">Saldo no fim</th><th class="num">Custo médio</th>
+        <th class="num">Valor do saldo</th><th class="num">Mov.</th>
+      </tr></thead>
+      <tbody><tr><td colspan="12" class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="controls" style="margin-top:16px; justify-content:center">
+    <button id="ant">‹ Anteriores</button>
+    <span class="muted" id="pag"></span>
+    <button id="prox">Próximos ›</button>
+  </div>
+</main>
+
+<script src="/app.js"></script>
+<script>ligarSair(); ligarTrabalhos();</script>
+<script>
+let offset = 0;
+const LIM = 60;
+const $ = id => document.getElementById(id);
+
+function params() {
+  return new URLSearchParams({
+    mes: $('mes').value, q: $('q').value.trim(), uf: $('uf').value,
+    situacao: $('situacao').value, ordem: $('ordem').value, limit: LIM, offset
+  });
+}
+
+function rotuloMes(m) {
+  if (!m) return '—';
+  const nomes = ['janeiro','fevereiro','março','abril','maio','junho','julho',
+                 'agosto','setembro','outubro','novembro','dezembro'];
+  const [a, mm] = m.split('-');
+  return `${nomes[+mm - 1]} de ${a}`;
+}
+
+async function carregar() {
+  const mes = $('mes').value;
+  if (!mes) return;
+  $('rot-mes').textContent = rotuloMes(mes);
+
+  let linhas, r;
+  try {
+    [linhas, r] = await Promise.all([
+      api('/api/periodo?' + params()),
+      api('/api/periodo/resumo?mes=' + mes)
+    ]);
+  } catch (e) { return falha(e); }
+
+  $('kpis').innerHTML = [
+    card('Itens movimentados', n(r.itens),
+         `${n(r.movimentos)} movimentos em ${n(r.filiais)} filial(is)`),
+    card('Entrou no mês', n(r.qtd_entrada) + ' un', money(r.vl_entrada)),
+    card('Saiu no mês', n(r.qtd_saida) + ' un',
+         `${money(r.vl_saida)} pela nota · ${money(r.vl_saida_custo)} pelo custo`),
+    card('Saldo no fim do mês', n(r.saldo_qtd) + ' un', money(r.saldo_valor),
+         +r.saldo_qtd < 0 ? 'alert' : ''),
+    +r.sem_custo > 0
+      ? card('Saída sem custo', n(r.sem_custo),
+             `de ${n(r.itens)} itens — valoração incompleta`, 'alert')
+      : card('Saída sem custo', '0', 'toda saída tem entrada que a lastreia', 'good'),
+  ].join('');
+
+  // Um mes so de saidas nao e um mes: e um lote de XML incompleto. Vale dizer
+  // antes que o auditor tire conclusao do saldo.
+  const av = $('aviso-entradas');
+  if (+r.itens > 0 && +r.sem_custo / +r.itens > 0.5) {
+    av.hidden = false;
+    $('aviso-entradas-txt').innerHTML =
+      `<b>${n(r.sem_custo)} dos ${n(r.itens)} itens</b> tiveram saída sem nenhuma ` +
+      `entrada no mês. Entraram ${n(r.qtd_entrada)} unidades contra ` +
+      `${n(r.qtd_saida)} que saíram. Se você esperava um mês equilibrado, ` +
+      `provavelmente faltam os XML de entrada — confira na tela Importar antes ` +
+      `de concluir qualquer coisa a partir do saldo.`;
+  } else {
+    av.hidden = true;
+  }
+
+  const total = linhas.length ? +linhas[0].total_geral : 0;
+  fill('tbl', linhas, x => `
+    <td>${chipUF(x.uf)}</td>
+    <td class="mono">${esc(x.cod_item)}</td>
+    <td class="desc">${x.descr_item ? esc(x.descr_item)
+        : '<span class="muted">sem cadastro</span>'}
+      ${x.sem_custo ? ' <span class="chip warn">sem custo</span>' : ''}</td>
+    <td>${esc(x.unid || '—')}</td>
+    <td class="num ${+x.qtd_entrada ? 'ent' : ''}">${+x.qtd_entrada ? n(x.qtd_entrada) : '—'}</td>
+    <td class="num">${+x.vl_entrada ? money(x.vl_entrada) : '—'}</td>
+    <td class="num ${+x.qtd_saida ? 'sai' : ''}">${+x.qtd_saida ? n(x.qtd_saida) : '—'}</td>
+    <td class="num">${+x.vl_saida ? money(x.vl_saida) : '—'}</td>
+    <td class="num ${+x.saldo_qtd < 0 ? 'neg' : ''}"><b>${n(x.saldo_qtd)}</b></td>
+    <td class="num">${+x.custo_medio ? money(x.custo_medio) : '—'}</td>
+    <td class="num">${+x.valor ? money(x.valor) : '—'}</td>
+    <td class="num">${n(x.movimentos)}</td>`);
+
+  $('pag').textContent = total
+    ? `${offset + 1}–${Math.min(offset + LIM, total)} de ${n(total)}`
+    : 'nenhum item';
+  $('ant').disabled = offset === 0;
+  $('prox').disabled = offset + LIM >= total;
+
+  // A ficha completa do item continua na Reconstrução: ali o Kardex mostra
+  // tambem o que veio antes do mes, que e o que explica o saldo negativo.
+  document.querySelectorAll('#tbl tbody tr').forEach((tr, i) => {
+    const x = linhas[i];
+    if (!x) return;
+    tr.classList.add('clicavel');
+    tr.title = 'Abrir a ficha completa do item na Reconstrução';
+    tr.onclick = () => {
+      location.href = '/reconstrucao?item=' + encodeURIComponent(x.cod_item)
+                    + '&cnpj=' + encodeURIComponent(x.cnpj);
+    };
+  });
+}
+
+async function atalhos() {
+  let ms;
+  try { ms = await api('/api/periodo/meses'); } catch { return; }
+  const comNfe = ms.filter(m => +m.movimentos_nfe > 0);
+  if (!comNfe.length) return;
+  if (!$('mes').value) $('mes').value = comNfe[0].mes;
+  $('meses').innerHTML = '<span class="muted">Meses com notas: </span>' +
+    comNfe.map(m => `<button data-mes="${m.mes}">${m.mes}
+        <span class="muted">(${n(m.movimentos_nfe)})</span></button>`).join('');
+  $('meses').querySelectorAll('[data-mes]').forEach(b => b.onclick = () => {
+    $('mes').value = b.dataset.mes; offset = 0; marcar(); carregar();
+  });
+  marcar();
+}
+
+/** Cartão de indicador. Cada tela define o seu; esta segue o da Reconstrução. */
+function card(lbl, val, foot, cls) {
+  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+          <div class="val sm">${val}</div><div class="foot">${foot || ''}</div></div>`;
+}
+
+/** Marca no atalho o mês que está selecionado. */
+function marcar() {
+  const m = $('mes').value;
+  $('meses').querySelectorAll('[data-mes]').forEach(
+    b => b.classList.toggle('on', b.dataset.mes === m));
+}
+
+let t;
+const redesenha = () => {
+  offset = 0; marcar(); clearTimeout(t); t = setTimeout(carregar, 250);
+};
+['mes', 'uf', 'situacao', 'ordem'].forEach(id => $(id).onchange = redesenha);
+$('q').oninput = redesenha;
+$('limpar').onclick = () => {
+  $('q').value = ''; $('uf').value = ''; $('situacao').value = '';
+  $('ordem').value = 'valor'; redesenha();
+};
+$('ant').onclick = () => { offset = Math.max(0, offset - LIM); carregar(); };
+$('prox').onclick = () => { offset += LIM; carregar(); };
+
+atalhos().then(carregar);
+</script>
+</body>
+</html>

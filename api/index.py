@@ -12,8 +12,10 @@ Diferenças em relação ao servidor local (app/server.py):
   · Sessão validada a cada requisição contra o Supabase Auth: a função é
     stateless, não há cache entre invocações.
 """
+import calendar
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -164,6 +166,68 @@ def rota_estoque(qs):
     return linhas
 
 
+def _mes(qs, padrao="2023-01"):
+    """'AAAA-MM' -> primeiro e ultimo dia. Mes invalido cai no padrao."""
+    v = (qs.get("mes") or [""])[0].strip()[:7]
+    if not re.match(r"^\d{4}-(0[1-9]|1[0-2])$", v):
+        v = padrao
+    ano, mes = int(v[:4]), int(v[5:7])
+    ult = calendar.monthrange(ano, mes)[1]
+    return f"{v}-01", f"{v}-{ult:02d}"
+
+
+def _periodo_params(qs):
+    ini, fim = _mes(qs)
+    origem = (qs.get("origem") or ["nfe"])[0]
+    return {"p_ini": ini, "p_fim": fim,
+            "p_origem": origem if origem in ("nfe", "") else "nfe"}
+
+
+def rota_periodo(qs):
+    """
+    Movimentacao do mes, todo item comecando em zero. Funcao STABLE: o
+    PostgREST aceita por GET e ainda filtra e ordena o resultado dela.
+    """
+    limite = min(int((qs.get("limit") or ["60"])[0]), 500)
+    offset = int((qs.get("offset") or ["0"])[0])
+    ordem = {"valor": "valor.desc", "saldo": "saldo_qtd.asc",
+             "entrada": "qtd_entrada.desc", "saida": "qtd_saida.desc",
+             "codigo": "cod_item.asc"}.get(
+                 (qs.get("ordem") or ["valor"])[0], "valor.desc")
+    p = dict(_periodo_params(qs), order=ordem, limit=limite, offset=offset)
+
+    # Item de saldo zero NAO e descartado: entrou 10 e saiu 10 e movimento do
+    # mes, ao contrario da posicao acumulada, onde zero e ausencia.
+    situacao = (qs.get("situacao") or [""])[0]
+    if situacao == "negativo":
+        p["saldo_qtd"] = "lt.0"
+    elif situacao == "positivo":
+        p["saldo_qtd"] = "gt.0"
+    elif situacao == "zerado":
+        p["saldo_qtd"] = "eq.0"
+    elif situacao == "sem_custo":
+        p["sem_custo"] = "is.true"
+    elif situacao == "so_entrada":
+        p["qtd_saida"] = "eq.0"
+        p["qtd_entrada"] = "gt.0"
+    elif situacao == "so_saida":
+        p["qtd_entrada"] = "eq.0"
+        p["qtd_saida"] = "gt.0"
+
+    uf = (qs.get("uf") or [""])[0]
+    if uf in ("SP", "CE", "SC"):
+        p["uf"] = f"eq.{uf}"
+    termo = (qs.get("q") or [""])[0].strip()
+    if termo:
+        p["busca"] = f"ilike.*{termo.upper()}*"
+
+    linhas = consulta_rest("rpc/estoque_periodo_detalhe", p)
+    total = offset + len(linhas) + (limite if len(linhas) == limite else 0)
+    for x in linhas:
+        x["total_geral"] = total
+    return linhas
+
+
 def rota_inventario(qs):
     limite = min(int((qs.get("limit") or ["60"])[0]), 500)
     offset = int((qs.get("offset") or ["0"])[0])
@@ -242,6 +306,11 @@ ROTAS = {
     "/api/import/notas": lambda qs: consulta_rest(
         "v_notas", {"order": "dt_emi.desc", "limit": 200}),
     "/api/trabalhos": lambda qs: consulta_rest("v_trabalho", {"order": "id.asc"}),
+    "/api/periodo": rota_periodo,
+    "/api/periodo/resumo": lambda qs: um(consulta_rest(
+        "rpc/estoque_periodo_resumo", _periodo_params(qs))),
+    "/api/periodo/meses": lambda qs: consulta_rest(
+        "v_meses_movimento", {"order": "mes.desc"}),
 }
 
 
@@ -474,6 +543,8 @@ def app(environ, start_response):
         caminho = "/index.html"
     elif caminho == "/reconstrucao":
         caminho = "/reconstrucao.html"
+    elif caminho == "/mes":
+        caminho = "/mes.html"
     elif caminho == "/importar":
         caminho = "/importar.html"
     elif caminho == "/relatorio":

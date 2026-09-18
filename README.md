@@ -12,6 +12,11 @@ cronológica desde um saldo de abertura congelado, aplicando custo médio
 ponderado móvel. Saídas baixam pelo custo vigente — nunca pelo valor da nota de
 venda, que é preço e não custo.
 
+**Reconstrói um mês isolado, do zero.** Todo item partindo de zero, só com as
+notas do período: entrou, saiu, saldo no fim. Serve quando não há inventário
+confiável para ancorar — ou quando ele existe e é justamente o que se quer
+conferir. Saldo negativo aí é esperado, não achado, e a tela diz isso.
+
 **Monta a ficha de cada item.** Um registro por movimento, com documento,
 contraparte, CFOP, entrada, saída e saldo corrido. Responde de onde veio o
 saldo, quem levou a mercadoria e em que momento o saldo furou.
@@ -102,8 +107,8 @@ Painel web:
 python app/server.py
 ```
 
-Cinco telas em `http://localhost:8777` — dashboard, estoque por data,
-importação, achados e papel de trabalho. O manual de uso está em
+Seis telas em `http://localhost:8777` — dashboard, estoque por data, mês
+isolado, importação, achados e papel de trabalho. O manual de uso está em
 [MANUAL.md](MANUAL.md).
 
 ## Testes

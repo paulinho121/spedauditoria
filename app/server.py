@@ -140,6 +140,54 @@ def sql_estoque(data, uf, termo, limit, offset, ordem, situacao=""):
             f"limit {int(limit)} offset {int(offset)}")
 
 
+def _mes(v, padrao):
+    """Aceita 'AAAA-MM' ou data completa. Devolve o primeiro e o ultimo dia."""
+    v = str(v or padrao).replace("'", "")[:10]
+    ano_mes = v[:7]
+    if not re.match(r"^\d{4}-(0[1-9]|1[0-2])$", ano_mes):
+        ano_mes = padrao
+    return (f"(date '{ano_mes}-01')",
+            f"(date '{ano_mes}-01' + interval '1 month - 1 day')::date")
+
+
+def sql_periodo(mes, uf, termo, limit, offset, ordem, situacao="", origem="nfe"):
+    ini, fim = _mes(mes, "2023-01")
+    org = origem if origem in ("nfe", "") else "nfe"
+    # Aqui nao se descarta item de saldo zero: entrou 10 e saiu 10 e movimento do
+    # mes, e some se filtrado como na posicao acumulada.
+    w = ["1=1"]
+    if situacao == "negativo":
+        w = ["saldo_qtd < 0"]
+    elif situacao == "positivo":
+        w = ["saldo_qtd > 0"]
+    elif situacao == "zerado":
+        w = ["saldo_qtd = 0"]
+    elif situacao == "sem_custo":
+        w = ["sem_custo"]
+    elif situacao == "so_entrada":
+        w = ["qtd_entrada > 0 and qtd_saida = 0"]
+    elif situacao == "so_saida":
+        w = ["qtd_saida > 0 and qtd_entrada = 0"]
+    if uf in ("SP", "CE", "SC"):
+        w.append(f"uf = '{uf}'")
+    if termo:
+        w.append("busca like '%" + termo.replace("'", "''").upper() + "%'")
+    cols = {"valor": "abs(valor) desc", "saldo": "saldo_qtd",
+            "entrada": "qtd_entrada desc", "saida": "qtd_saida desc",
+            "codigo": "cod_item"}
+    return (f"select *, count(*) over() as total_geral "
+            f"from estoque_periodo_detalhe({ini}, {fim}, '{org}') "
+            f"where {' and '.join(w)} "
+            f"order by {cols.get(ordem, 'abs(valor) desc')} nulls last "
+            f"limit {int(limit)} offset {int(offset)}")
+
+
+def sql_periodo_resumo(mes, origem="nfe"):
+    ini, fim = _mes(mes, "2023-01")
+    org = origem if origem in ("nfe", "") else "nfe"
+    return f"select * from estoque_periodo_resumo({ini}, {fim}, '{org}')"
+
+
 def sql_inventario(uf, termo, limit, offset, ordem):
     w = ["1=1"]
     if uf in ("SP", "CE", "SC"):
@@ -401,6 +449,21 @@ ROUTES = {
         + (qs.get("data") or ["2022-12-31"])[0].replace("'", "") + "')")[0],
     "/api/datas": lambda qs: query(
         "select dt::text, movimentos, filiais from v_datas_movimento order by dt desc"),
+    "/api/periodo": lambda qs: query(sql_periodo(
+        (qs.get("mes") or [""])[0],
+        (qs.get("uf") or [""])[0],
+        (qs.get("q") or [""])[0],
+        min(int((qs.get("limit") or ["60"])[0]), 500),
+        int((qs.get("offset") or ["0"])[0]),
+        (qs.get("ordem") or ["valor"])[0],
+        (qs.get("situacao") or [""])[0],
+        (qs.get("origem") or ["nfe"])[0])),
+    "/api/periodo/resumo": lambda qs: query(sql_periodo_resumo(
+        (qs.get("mes") or [""])[0], (qs.get("origem") or ["nfe"])[0]))[0],
+    "/api/periodo/meses": lambda qs: query(
+        "select mes, primeiro_dia::text, ultimo_dia::text, movimentos, "
+        "       movimentos_nfe, filiais, itens "
+        "from v_meses_movimento order by mes desc"),
     "/api/trabalhos": lambda qs: query(
         "select id, nome, cliente, exercicio, status, ativo, arquivos, notas, "
         "       movimentos, achados_abertos, abertura, ufs, "
@@ -589,6 +652,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/index.html"
         if path == "/reconstrucao":
             path = "/reconstrucao.html"
+        if path == "/mes":
+            path = "/mes.html"
         if path == "/importar":
             path = "/importar.html"
         if path == "/relatorio":
