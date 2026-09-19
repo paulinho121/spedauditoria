@@ -274,13 +274,19 @@ No topo da tela Mês aparece o faturamento da filial escolhida no seletor — ou
 do grupo, sem as notas entre filiais, quando nenhuma está escolhida. Clique no
 cartão *Faturamento líquido* para ver cada nota que compõe o número.
 
+Conta o que **movimenta o financeiro** — o critério do ERP da empresa, que o
+próprio XML confirma: as notas que não contam trazem forma de pagamento 90,
+"sem pagamento".
+
 | Operação | Entra? |
 |---|---|
 | Venda de mercadoria (com e sem ST, a não contribuinte, exportação) | soma |
 | Devolução de venda — emitida pela filial ou pelo cliente | subtrai |
-| Entrega futura: remessa (5117/6117) | soma |
-| Entrega futura: faturamento antecipado (5922/6922) | não soma — aparece a parte |
-| Remessa em locação ou comodato (5908/6908) | não soma — aparece a parte |
+| Entrega futura: faturamento (5922/6922) | soma — é a nota com financeiro |
+| Entrega futura: remessa (5117/6117) | não soma — só movimenta estoque |
+| Locação (5908/6908 com natureza de locação) | soma |
+| Comodato (5908/6908 com natureza de comodato) | não soma — sem financeiro |
+| Serviço (NFS-e) | soma |
 | Transferência, remessa, retorno, conserto | não é faturamento |
 
 **Notas de serviço (NFS-e)** entram no faturamento como grupo próprio, pela
@@ -290,12 +296,13 @@ próprio precisa de leitor à parte, e o arquivo aparece como *ignorado*. Na
 apuração, serviço entra na base de PIS e COFINS e na base presumida de IRPJ e
 CSLL com **32%** (revenda usa 8% e 12%). O ISS aparece destacado, informativo.
 
-A venda para entrega futura gera duas notas com o mesmo valor. Conta a
-remessa, quando a mercadoria sai; somar as duas contaria a venda duas vezes.
+A venda para entrega futura gera duas notas com o mesmo valor. Conta a de
+faturamento, que movimenta o financeiro; a remessa só tira a mercadoria do
+estoque. Somar as duas contaria a venda duas vezes.
 
-A remessa em locação leva o valor do **equipamento**, não do aluguel. A
-receita do aluguel e a de serviços saem em NFS-e, que o sistema ainda não lê —
-por isso não estão no número.
+Locação e comodato usam o mesmo CFOP; o que separa é a natureza da operação.
+A locação é receita: entra na base de PIS/COFINS e na base presumida de IRPJ e
+CSLL com **32%**, como serviço. O comodato não tem financeiro.
 
 São duas medidas, lado a lado:
 

@@ -92,11 +92,11 @@ td.neg { color: var(--error); font-variant-numeric: tabular-nums; }
     número que o ERP mostra. <b>Receita bruta</b> é a base dos tributos federais:
     mercadoria, frete, seguro e outras despesas cobradas, menos desconto, sem o
     IPI e o ICMS-ST. Linha a linha pelo CFOP, só de notas autorizadas.
-    <b>Entrega futura</b> conta na remessa (5117/6117), quando
-    a mercadoria sai; o faturamento antecipado (5922/6922) aparece a parte para
-    não contar a mesma venda duas vezes. <b>Remessa em locação ou comodato</b>
-    (5908/6908) leva o valor do equipamento, não o do aluguel, e por isso não
-    soma. <b>Serviço</b> entra pelas NFS-e (padrão nacional) importadas, pela
+    Conta o que <b>movimenta o financeiro</b>. <b>Entrega futura</b> conta na
+    nota de faturamento (5922/6922); a remessa (5117/6117) só movimenta estoque
+    e aparece à parte, para não contar a mesma venda duas vezes.
+    <b>Locação</b> (5908/6908 com natureza de locação) conta; <b>comodato</b>,
+    no mesmo CFOP, não tem financeiro e não conta. <b>Serviço</b> entra pelas NFS-e (padrão nacional) importadas, pela
     competência; a filial que não tiver as NFS-e importadas aparece sem serviço.
   </p>
 
@@ -302,7 +302,10 @@ const GRUPO_FAT = {
   venda: 'Venda',
   servico: 'Serviço (NFS-e)',
   devolucao_venda: 'Devolução de venda',
-  entrega_futura_faturamento: 'Entrega futura — faturamento antecipado',
+  entrega_futura_faturamento: 'Entrega futura — faturamento',
+  entrega_futura_remessa: 'Entrega futura — remessa (só estoque)',
+  locacao: 'Locação',
+  comodato: 'Comodato (sem financeiro)',
   remessa_locacao_comodato: 'Remessa em locação / comodato',
 };
 
@@ -338,7 +341,7 @@ async function carregarFaturamento(mes, uf) {
     ${card('Devoluções de venda', money(devol),
            devol ? `${n(notasDe(-1))} nota(s) — já descontadas` : 'nenhuma no período')}
     ${card('Fora do faturamento', money(fora),
-           'entrega futura antecipada e remessa de locação — não somam')}`;
+           'remessa de entrega futura e comodato — sem financeiro, não somam')}`;
   const abre = () => abrirNotasFaturamento(mes, uf);
   $('fat-abrir').onclick = abre;
   $('fat-abrir').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abre(); } };

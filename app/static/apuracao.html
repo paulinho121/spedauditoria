@@ -230,7 +230,7 @@ async function carregar() {
   const v = k => +(F[k] || {}).valor || 0;
   $('fed-kpis').innerHTML = [
     card('Receita bruta', money(v('receita_bruta')),
-         `vendas ${money(v('receita_vendas'))} · serviços ${money(v('receita_servicos'))} · devoluções ${money(v('devolucoes'))}`),
+         `vendas ${money(v('receita_vendas'))} · locação ${money(v('receita_locacao'))} · serviços ${money(v('receita_servicos'))} · devoluções ${money(v('devolucoes'))}`),
     card('PIS + COFINS', money(v('pis') + v('cofins')),
          `sem o ICMS na base: ${money(v('pis_sem_icms') + v('cofins_sem_icms'))}`),
     card('IRPJ + CSLL (prévia)', money(v('irpj') + v('csll')), 'apuração é trimestral'),
@@ -240,12 +240,13 @@ async function carregar() {
     $('fed-kpis').insertAdjacentHTML('beforeend', card('Linhas sem imposto gravado',
       n(v('linhas_sem_imposto')), 'reimporte os XML dessas notas para completar', 'alert'));
   }
-  const ordem = ['receita_bruta','receita_vendas','receita_servicos','devolucoes','base_pis_cofins',
+  const ordem = ['receita_bruta','receita_vendas','receita_locacao','receita_servicos','devolucoes','base_pis_cofins',
                  'pis','cofins','icms_na_base',
                  'pis_sem_icms','cofins_sem_icms','pis_destacado','cofins_destacado',
                  'base_irpj','irpj','base_csll','csll','iss_destacado','ibs_destacado','cbs_destacado'];
   const rot = { receita_bruta: 'Receita bruta', receita_vendas: '· da venda de mercadoria',
-    receita_servicos: '· de serviços (NFS-e)', iss_destacado: 'ISS destacado nas NFS-e',
+    receita_locacao: '· de locação', receita_servicos: '· de serviços (NFS-e)',
+    iss_destacado: 'ISS destacado nas NFS-e',
     devolucoes: 'Devoluções de venda',
     base_pis_cofins: 'Base de PIS/COFINS', pis: 'PIS a recolher', cofins: 'COFINS a recolher',
     icms_na_base: 'ICMS dentro da base', pis_sem_icms: 'PIS sem o ICMS na base',
