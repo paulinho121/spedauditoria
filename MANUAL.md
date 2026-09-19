@@ -368,8 +368,13 @@ anterior — a mercadoria já se movimentou na original. **Nota de ajuste**
 **qualquer que seja o CFOP e mesmo que venha com quantidade**. A regra olha a
 finalidade da nota antes do CFOP.
 
-A nota complementar de valor continua contando no **faturamento**: é preço
-cobrado do cliente.
+Para o **faturamento**, a nota complementar tem duas naturezas:
+
+- **Complemento de preço** — mercadoria cobrada a menor. É receita, e conta.
+- **Complemento de imposto** — ICMS ou IPI destacado a menor. Não é receita: é
+  o imposto que faltou. O sistema reconhece quando os impostos destacados
+  cobrem o valor inteiro da nota; a receita dela fica zero, e o ICMS continua
+  como débito na apuração.
 
 **5949 e 6949** (outras saídas não especificadas) não movimentam estoque, por
 decisão do auditor. Atenção ao efeito disso: em importação **por conta e
