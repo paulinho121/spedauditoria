@@ -96,8 +96,8 @@ td.neg { color: var(--error); font-variant-numeric: tabular-nums; }
     a mercadoria sai; o faturamento antecipado (5922/6922) aparece a parte para
     não contar a mesma venda duas vezes. <b>Remessa em locação ou comodato</b>
     (5908/6908) leva o valor do equipamento, não o do aluguel, e por isso não
-    soma. A receita do aluguel e a de serviços saem em NFS-e, que o sistema
-    ainda não lê.
+    soma. <b>Serviço</b> entra pelas NFS-e (padrão nacional) importadas, pela
+    competência; a filial que não tiver as NFS-e importadas aparece sem serviço.
   </p>
 
   <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
@@ -300,6 +300,7 @@ async function atalhos() {
 /* ------------------------------------------------------------ faturamento */
 const GRUPO_FAT = {
   venda: 'Venda',
+  servico: 'Serviço (NFS-e)',
   devolucao_venda: 'Devolução de venda',
   entrega_futura_faturamento: 'Entrega futura — faturamento antecipado',
   remessa_locacao_comodato: 'Remessa em locação / comodato',

@@ -283,6 +283,13 @@ cartão *Faturamento líquido* para ver cada nota que compõe o número.
 | Remessa em locação ou comodato (5908/6908) | não soma — aparece a parte |
 | Transferência, remessa, retorno, conserto | não é faturamento |
 
+**Notas de serviço (NFS-e)** entram no faturamento como grupo próprio, pela
+competência, assim que importadas — arraste os XML na tela Importar, como as
+NF-e. O sistema lê o **padrão nacional** de NFS-e; município com leiaute
+próprio precisa de leitor à parte, e o arquivo aparece como *ignorado*. Na
+apuração, serviço entra na base de PIS e COFINS e na base presumida de IRPJ e
+CSLL com **32%** (revenda usa 8% e 12%). O ISS aparece destacado, informativo.
+
 A venda para entrega futura gera duas notas com o mesmo valor. Conta a
 remessa, quando a mercadoria sai; somar as duas contaria a venda duas vezes.
 

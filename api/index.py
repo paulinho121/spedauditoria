@@ -507,7 +507,7 @@ def importar_upload(corpo):
     _sobe_auditoria()
     import tempfile
     from collections import Counter
-    from auditoria import carga_json, ecd as pecd, nfe as pnfe
+    from auditoria import carga_json, ecd as pecd, nfe as pnfe, nfse as pnfse
 
     pasta = tempfile.mkdtemp(prefix="fs_")
     saida = []
@@ -531,6 +531,10 @@ def importar_upload(corpo):
                 from auditoria import carga_ecd
                 payload, probs = carga_ecd.payload(caminho)
                 r = chama_rpc("importar_ecd", payload)
+            elif nome.lower().endswith(".xml") and pnfse.e_nfse(caminho):
+                payload, _n = carga_json.payload_nfse(caminho)
+                r = chama_rpc("importar_nfse", payload)
+                probs = []
             elif nome.lower().endswith(".xml") and pnfe.e_evento(caminho):
                 # Cancelamento avulso: sem isto caía em "ignorado" por não ter
                 # infNFe, e a nota cancelada seguia no estoque.

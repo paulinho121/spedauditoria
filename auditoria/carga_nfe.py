@@ -84,6 +84,20 @@ def importa_evento(caminho, quem, con):
                         avisos=avisos)
 
 
+def importa_nfse(caminho, quem, con):
+    """NFS-e nacional. Serviço: faturamento, não estoque."""
+    nome = os.path.basename(caminho)
+    try:
+        payload, n = carga_json.payload_nfse(caminho, quem)
+    except Exception as e:
+        return ResultadoNFe(nome, "ignorado", avisos=[f"{type(e).__name__}: {e}"])
+    r = _chama(con, "importar_nfse", payload)
+    avisos = [f"NFS-e {n.numero} · {n.x_trib_nac} · R$ {n.v_serv}"]
+    if r.get("situacao") == "fora_do_grupo":
+        avisos.append(f"prestador {n.prest_cnpj} não é estabelecimento auditado")
+    return ResultadoNFe(nome, r.get("situacao", "?"), n.chave, r.get("nfse_id"), avisos=avisos)
+
+
 def importa(caminho, quem=None, con=None, cache=None):
     """
     Importa um XML: nota ou evento. `cache` fica na assinatura por
@@ -94,6 +108,9 @@ def importa(caminho, quem=None, con=None, cache=None):
     nome = os.path.basename(caminho)
 
     try:
+        from . import nfse as pnfse
+        if pnfse.e_nfse(caminho):
+            return importa_nfse(caminho, quem, con)
         if pnfe.e_evento(caminho):
             return importa_evento(caminho, quem, con)
         payload, probs = carga_json.payload_nfe(caminho, quem)

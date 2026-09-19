@@ -92,6 +92,16 @@ def payload_evento(caminho, quem=None):
     }, ev
 
 
+def payload_nfse(caminho, quem=None):
+    """NFS-e nacional para `importar_nfse`."""
+    from . import nfse as pnfse
+    n = pnfse.parse(caminho)
+    quem = quem or os.environ.get("AUDITOR") or getpass.getuser()
+    d = dict(vars(n))
+    d["importado_por"] = quem
+    return d, n
+
+
 def como_texto(p):
     """JSON pronto para ir no corpo da chamada."""
     return json.dumps(p, default=_json, ensure_ascii=False)
