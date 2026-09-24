@@ -127,9 +127,11 @@ td.neg, .neg { color: var(--error); font-variant-numeric: tabular-nums; }
 
   <h2 class="sec">Operações por CFOP <small id="cfop-escopo"></small></h2>
   <div class="controls" style="margin:0 0 12px">
-    <select id="cfop-qual">
-      <option value="">Todos os CFOP do mês</option>
-    </select>
+    <div class="multi" id="cfop-qual">
+      <button type="button" id="cfop-qual-btn" aria-expanded="false"
+              aria-haspopup="true">Todos os CFOP do mês</button>
+      <div class="multi-lista" id="cfop-qual-lista" hidden></div>
+    </div>
     <select id="cfop-lado">
       <option value="">Os dois lados da nota</option>
       <option value="emitente">Só o que a filial emitiu</option>
@@ -455,27 +457,64 @@ async function carregarCfops(mes, uf) {
   desenharCfops(mes, uf);
 }
 
+/* CFOP marcados. Vazio é "todos" — conferir começa vendo o mês inteiro. */
+const cfopMarcados = new Set();
+
 /**
  * A lista de CFOP é a do próprio mês e filial — não um catálogo. Oferecer CFOP
  * que não teve operação só daria tabela vazia.
  */
 function listarCfops() {
-  const sel = $('cfop-qual');
-  const antes = sel.value;
   const unicos = [...new Map(cfopRows.map(r => [r.cfop, r.descricao]))]
     .sort((a, b) => a[0].localeCompare(b[0]));
-  sel.innerHTML = '<option value="">Todos os CFOP do mês</option>' +
-    unicos.map(([c, d]) =>
-      `<option value="${esc(c)}">${esc(c)} — ${esc((d || '').slice(0, 58))}</option>`).join('');
-  // Trocar de mês ou de filial pode extinguir o CFOP escolhido; nesse caso
-  // volta para todos, em vez de deixar a tela vazia sem explicação.
-  sel.value = unicos.some(([c]) => c === antes) ? antes : '';
+  // Trocar de mês ou de filial pode extinguir um CFOP marcado; ele sai da
+  // marcação, em vez de deixar a tabela vazia sem explicação.
+  const existe = new Set(unicos.map(([c]) => c));
+  [...cfopMarcados].forEach(c => { if (!existe.has(c)) cfopMarcados.delete(c); });
+
+  $('cfop-qual-lista').innerHTML = `
+    <div class="multi-acoes">
+      <button type="button" data-todos>Marcar todos</button>
+      <button type="button" data-limpar>Limpar</button>
+    </div>` +
+    unicos.map(([c, d]) => `<label>
+        <input type="checkbox" value="${esc(c)}"${cfopMarcados.has(c) ? ' checked' : ''}>
+        <span class="cod">${esc(c)}</span>
+        <span class="muted">${esc(d || '')}</span>
+      </label>`).join('');
+
+  $('cfop-qual-lista').querySelectorAll('input[type=checkbox]').forEach(
+    el => el.onchange = () => {
+      el.checked ? cfopMarcados.add(el.value) : cfopMarcados.delete(el.value);
+      rotuloCfops();
+      desenharCfops($('mes').value, $('uf').value);
+    });
+  const marcarTodos = marca => () => {
+    cfopMarcados.clear();
+    if (marca) unicos.forEach(([c]) => cfopMarcados.add(c));
+    $('cfop-qual-lista').querySelectorAll('input[type=checkbox]').forEach(
+      el => el.checked = marca);
+    rotuloCfops();
+    desenharCfops($('mes').value, $('uf').value);
+  };
+  $('cfop-qual-lista').querySelector('[data-todos]').onclick = marcarTodos(true);
+  $('cfop-qual-lista').querySelector('[data-limpar]').onclick = marcarTodos(false);
+  rotuloCfops();
+}
+
+/** O que está marcado tem de se ler sem abrir a lista. */
+function rotuloCfops() {
+  const m = [...cfopMarcados];
+  $('cfop-qual-btn').textContent =
+    !m.length ? 'Todos os CFOP do mês'
+    : m.length <= 3 ? 'CFOP ' + m.sort().join(', ')
+    : `${m.length} CFOP marcados`;
 }
 
 function desenharCfops(mes, uf) {
-  const lado = $('cfop-lado').value, qual = $('cfop-qual').value;
+  const lado = $('cfop-lado').value;
   const vistas = cfopRows.filter(r =>
-    (!qual || r.cfop === qual) &&
+    (!cfopMarcados.size || cfopMarcados.has(r.cfop)) &&
     (!lado || r.lado === lado) &&
     (!$('cfop-parados').checked || +r.linhas > +r.linhas_com_movimento));
   const soma = c => vistas.reduce((a, r) => a + +r[c], 0);
@@ -592,8 +631,23 @@ const redesenha = () => {
 ['mes', 'uf', 'situacao', 'ordem'].forEach(id => $(id).onchange = redesenha);
 // O filtro do CFOP redesenha só a sua tabela: refazer o mês inteiro a cada
 // clique custaria três consultas para trocar uma coluna de lugar.
-['cfop-qual', 'cfop-lado', 'cfop-parados'].forEach(
+['cfop-lado', 'cfop-parados'].forEach(
   id => $(id).onchange = () => desenharCfops($('mes').value, $('uf').value));
+
+// A lista de CFOP abre e fecha no botão, e fecha ao clicar fora ou no Esc —
+// marcar vários seguidos não pode exigir reabrir a cada clique.
+(function ligarListaCfop() {
+  const cx = $('cfop-qual'), lista = $('cfop-qual-lista'), bt = $('cfop-qual-btn');
+  const mostrar = abrir => {
+    lista.hidden = !abrir;
+    bt.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+    if (abrir) cx.dataset.aberto = '1'; else delete cx.dataset.aberto;
+  };
+  bt.onclick = e => { e.stopPropagation(); mostrar(lista.hidden); };
+  lista.onclick = e => e.stopPropagation();
+  document.addEventListener('click', () => mostrar(false));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') mostrar(false); });
+})();
 $('q').oninput = redesenha;
 $('limpar').onclick = () => {
   $('q').value = ''; $('uf').value = ''; $('situacao').value = '';
