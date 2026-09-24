@@ -12,7 +12,7 @@
 .datas button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
 /* Saldo negativo no fim do mês. Aqui é informação, não erro — por isso o
    vermelho fica só no número, sem fundo de alerta como nos cards. */
-td.neg { color: var(--error); font-variant-numeric: tabular-nums; }
+td.neg, .neg { color: var(--error); font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -125,6 +125,37 @@ td.neg { color: var(--error); font-variant-numeric: tabular-nums; }
     </div>
   </div>
 
+  <h2 class="sec">Operações por CFOP <small id="cfop-escopo"></small></h2>
+  <div class="controls" style="margin:0 0 12px">
+    <select id="cfop-lado">
+      <option value="">Os dois lados da nota</option>
+      <option value="emitente">Só o que a filial emitiu</option>
+      <option value="destino">Só o que a filial recebeu</option>
+    </select>
+    <label class="muted" style="display:flex;align-items:center;gap:6px;font-size:13px">
+      <input type="checkbox" id="cfop-parados"> só CFOP com linha sem movimento
+    </label>
+  </div>
+  <div class="wrap" style="margin-bottom:8px">
+    <table id="tbl-cfop">
+      <thead><tr><th>CFOP</th><th class="desc">Operação</th><th>Efeito no estoque</th>
+        <th>Lado</th><th class="num">Notas</th><th class="num">Linhas</th>
+        <th class="num">Sem mov.</th><th class="num">Entrou</th><th class="num">Saiu</th>
+        <th class="num">De terceiro</th><th class="num">Valor das notas</th></tr></thead>
+      <tbody><tr><td colspan="11" class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="muted" style="font-size:12.5px;margin:0 0 24px;line-height:1.6">
+    A base é a <b>linha da nota</b>, não o movimento: o CFOP que não movimenta
+    estoque aparece com zero em vez de sumir — quem confere precisa ver que ele
+    foi considerado. <b>Sem mov.</b> é linha importada que não virou movimento;
+    em CFOP simbólico ou fora de escopo isso é esperado, nos demais é o que falta
+    resolver. Cada nota entre filiais aparece duas vezes: <b>saída</b> em quem
+    emitiu e <b>entrada</b> em quem recebeu. <b>De terceiro</b> é mercadoria de
+    outro em nosso poder, que não entra no estoque próprio. Clique num CFOP para
+    ver os itens e as notas.
+  </p>
+
   <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
 
   <div class="wrap" style="margin-top:16px">
@@ -174,6 +205,7 @@ async function carregar() {
   if (!mes) return;
   $('rot-mes').textContent = rotuloMes(mes);
   carregarFaturamento(mes, $('uf').value);
+  carregarCfops(mes, $('uf').value);
 
   let linhas, r, bloq;
   try {
@@ -395,6 +427,124 @@ async function abrirNotasFaturamento(mes, uf) {
     </table></div>`;
 }
 
+/* ------------------------------------------------- conferência por CFOP */
+const EFEITO = {
+  soma: ['entra no estoque', 'ok'],
+  baixa: ['sai do estoque', 'ok'],
+  para_terceiros: ['sai do estoque, fica em poder de terceiro', 'warn'],
+  de_terceiros: ['volta do poder de terceiro', 'warn'],
+  terceiro_entra: ['bem de terceiro entra em nosso poder', 'warn'],
+  terceiro_sai: ['bem de terceiro sai do nosso poder', 'warn'],
+  simbolico: ['não movimenta — operação simbólica', ''],
+  fora_escopo: ['não movimenta — fora do estoque', ''],
+  nao_classificado: ['CFOP ainda sem classificação', 'err'],
+};
+
+async function carregarCfops(mes, uf) {
+  $('cfop-escopo').textContent =
+    `${uf ? 'filial ' + uf : 'todas as filiais'} · ${rotuloMes(mes)}`;
+  let rows;
+  try {
+    rows = await api(`/api/periodo/cfops?mes=${mes}&uf=${encodeURIComponent(uf)}`);
+  } catch (e) { return falha(e); }
+
+  const lado = $('cfop-lado').value;
+  const vistas = rows.filter(r => (!lado || r.lado === lado) &&
+    (!$('cfop-parados').checked || +r.linhas > +r.linhas_com_movimento));
+  const soma = c => vistas.reduce((a, r) => a + +r[c], 0);
+  const paradas = soma('linhas') - soma('linhas_com_movimento');
+
+  fill('tbl-cfop', vistas, r => {
+    const [txt, cls] = EFEITO[r.efeito] || [r.efeito, ''];
+    const semMov = +r.linhas - +r.linhas_com_movimento;
+    // Em CFOP que não movimenta de propósito, linha parada é o esperado e não
+    // se destaca; nos outros, é exatamente o que falta conferir.
+    const espera = r.efeito === 'simbolico' || r.efeito === 'fora_escopo';
+    return `
+    <td class="mono"><b>${esc(r.cfop)}</b></td>
+    <td class="desc">${esc(r.descricao)}</td>
+    <td><span class="chip ${cls}">${esc(txt)}</span></td>
+    <td>${r.lado === 'emitente' ? 'emitiu' : 'recebeu'}</td>
+    <td class="num">${n(r.notas)}</td>
+    <td class="num">${n(r.linhas)}</td>
+    <td class="num">${semMov
+        ? (espera ? `<span class="muted">${n(semMov)}</span>`
+                  : `<b class="neg">${n(semMov)}</b>`) : '—'}</td>
+    <td class="num ${+r.qtd_entrada ? 'ent' : ''}">${+r.qtd_entrada ? n(r.qtd_entrada) : '—'}</td>
+    <td class="num ${+r.qtd_saida ? 'sai' : ''}">${+r.qtd_saida ? n(r.qtd_saida) : '—'}</td>
+    <td class="num">${+r.qtd_de_terceiro ? n(r.qtd_de_terceiro) : '—'}</td>
+    <td class="num"><b>${money(r.valor_notas)}</b></td>`;
+  }, vistas.length ? `<tfoot><tr><td colspan="4">${n(vistas.length)} CFOP(s)</td>
+      <td class="num">${n(soma('notas'))}</td><td class="num">${n(soma('linhas'))}</td>
+      <td class="num">${paradas ? n(paradas) : '—'}</td>
+      <td class="num">${n(soma('qtd_entrada'))}</td>
+      <td class="num">${n(soma('qtd_saida'))}</td><td></td>
+      <td class="num">${money(soma('valor_notas'))}</td></tr></tfoot>` : '');
+
+  document.querySelectorAll('#tbl-cfop tbody tr').forEach((tr, i) => {
+    const r = vistas[i];
+    if (!r) return;
+    tr.classList.add('clicavel');
+    tr.title = 'Ver os itens e as notas deste CFOP';
+    tr.onclick = () => abrirCfop(mes, uf, r);
+  });
+}
+
+async function abrirCfop(mes, uf, r) {
+  const [txt] = EFEITO[r.efeito] || [r.efeito];
+  const p = abrirPainel(`CFOP ${esc(r.cfop)} — ${esc(r.descricao)}`,
+    `${uf ? 'Filial ' + uf : 'Todas as filiais'} · ${rotuloMes(mes)} · ` +
+    `${r.lado === 'emitente' ? 'a filial emitiu' : 'a filial recebeu'} · ${esc(txt)}`);
+  const q = `mes=${mes}&uf=${encodeURIComponent(uf)}&cfop=${encodeURIComponent(r.cfop)}` +
+            `&lado=${r.lado}`;
+  let itens, notas;
+  try {
+    [itens, notas] = await Promise.all([
+      api('/api/periodo/cfop/itens?' + q), api('/api/periodo/cfop/notas?' + q)]);
+  } catch (e) {
+    p.corpo.innerHTML = `<div class="err-box">Não consegui carregar o CFOP.<br>${esc(e.message)}</div>`;
+    return;
+  }
+  p.corpo.innerHTML = `
+    <h3 class="sec" style="margin-top:0">Itens</h3>
+    <div class="wrap"><table>
+      <thead><tr><th>UF</th><th>Código</th><th class="desc">Descrição</th><th>Un.</th>
+        <th class="num">Notas</th><th class="num">Entrou</th><th class="num">Saiu</th>
+        <th class="num">De terceiro</th><th class="num">Sem movimento</th>
+        <th class="num">Valor</th></tr></thead>
+      <tbody>${itens.map(x => `<tr>
+        <td>${chipUF(x.uf)}</td>
+        <td class="mono">${esc(x.cod_item)}</td>
+        <td class="desc">${x.descr_item ? esc(x.descr_item)
+            : '<span class="muted">sem cadastro</span>'}</td>
+        <td>${esc(x.unid || '—')}</td>
+        <td class="num">${n(x.notas)}</td>
+        <td class="num ${+x.qtd_entrada ? 'ent' : ''}">${+x.qtd_entrada ? n(x.qtd_entrada) : '—'}</td>
+        <td class="num ${+x.qtd_saida ? 'sai' : ''}">${+x.qtd_saida ? n(x.qtd_saida) : '—'}</td>
+        <td class="num">${+x.qtd_de_terceiro ? n(x.qtd_de_terceiro) : '—'}</td>
+        <td class="num">${+x.qtd_sem_movimento
+            ? '<b class="neg">' + n(x.qtd_sem_movimento) + '</b>' : '—'}</td>
+        <td class="num">${money(x.valor)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <h3 class="sec">Notas</h3>
+    <div class="wrap"><table>
+      <thead><tr><th>Data</th><th>NF</th><th class="desc">Contraparte</th>
+        <th class="desc">Natureza da operação</th><th class="num">Linhas</th>
+        <th class="num">Com movimento</th><th class="num">Qtd</th>
+        <th class="num">Valor</th></tr></thead>
+      <tbody>${notas.map(x => `<tr>
+        <td class="mono">${brDate(x.dt_emi)}</td>
+        <td class="mono">${esc(x.num_nf)}</td>
+        <td class="desc">${esc((x.contraparte || '—').slice(0, 40))}</td>
+        <td class="desc">${esc(x.nat_op || '—')}</td>
+        <td class="num">${n(x.linhas)}</td>
+        <td class="num">${+x.linhas_com_movimento === +x.linhas ? n(x.linhas_com_movimento)
+            : '<b class="neg">' + n(x.linhas_com_movimento) + '</b>'}</td>
+        <td class="num">${n(x.qtd)}</td>
+        <td class="num">${money(x.valor)}</td></tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
 /** Cartão de indicador. Cada tela define o seu; esta segue o da Reconstrução. */
 function card(lbl, val, foot, cls) {
   return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
@@ -413,6 +563,10 @@ const redesenha = () => {
   offset = 0; marcar(); clearTimeout(t); t = setTimeout(carregar, 250);
 };
 ['mes', 'uf', 'situacao', 'ordem'].forEach(id => $(id).onchange = redesenha);
+// O filtro do CFOP redesenha só a sua tabela: refazer o mês inteiro a cada
+// clique custaria três consultas para trocar uma coluna de lugar.
+['cfop-lado', 'cfop-parados'].forEach(
+  id => $(id).onchange = () => carregarCfops($('mes').value, $('uf').value));
 $('q').oninput = redesenha;
 $('limpar').onclick = () => {
   $('q').value = ''; $('uf').value = ''; $('situacao').value = '';

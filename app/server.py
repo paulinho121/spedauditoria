@@ -253,6 +253,20 @@ def sql_periodo_bloqueios(mes):
     return f"select * from periodo_bloqueios({ini}, {fim})"
 
 
+def sql_conferencia_cfop(mes, uf):
+    ini, fim = _mes(mes, "2023-01")
+    return f"select * from conferencia_cfop({ini}, {fim}, {_cnpj_da_uf(uf)})"
+
+
+def sql_conferencia_cfop_detalhe(mes, uf, cfop, lado, funcao):
+    """Itens ou notas de um CFOP. O lado vazio traz os dois."""
+    ini, fim = _mes(mes, "2023-01")
+    c = re.sub(r"\D", "", cfop)[:4]
+    l = f"'{lado}'" if lado in ("emitente", "destino") else "null"
+    return (f"select * from {funcao}({ini}, {fim}, '{c}', {_cnpj_da_uf(uf)}, {l})"
+            if c else "select 1 where false")
+
+
 def sql_periodo_resumo(mes, origem="nfe"):
     ini, fim = _mes(mes, "2023-01")
     org = origem if origem in ("nfe", "") else "nfe"
@@ -568,6 +582,16 @@ ROUTES = {
         (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0], "faturamento_notas")),
     "/api/periodo/bloqueios": lambda qs: query(
         sql_periodo_bloqueios((qs.get("mes") or [""])[0])),
+    "/api/periodo/cfops": lambda qs: query(sql_conferencia_cfop(
+        (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0])),
+    "/api/periodo/cfop/itens": lambda qs: query(sql_conferencia_cfop_detalhe(
+        (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0],
+        (qs.get("cfop") or [""])[0], (qs.get("lado") or [""])[0],
+        "conferencia_cfop_itens")),
+    "/api/periodo/cfop/notas": lambda qs: query(sql_conferencia_cfop_detalhe(
+        (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0],
+        (qs.get("cfop") or [""])[0], (qs.get("lado") or [""])[0],
+        "conferencia_cfop_notas")),
     "/api/periodo/meses": lambda qs: query(
         "select mes, primeiro_dia::text, ultimo_dia::text, movimentos, "
         "       movimentos_nfe, filiais, itens "

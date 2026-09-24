@@ -318,6 +318,31 @@ essencialmente, o IPI — a empresa é importadora e destaca IPI na revenda.
 Em julho/2026, o faturamento total de SP bate com o ERP no centavo
 (R$ 741.643,84). Só entram notas autorizadas.
 
+### Conferir o mês operação por operação (CFOP)
+
+Abaixo do faturamento, a seção **Operações por CFOP** separa tudo o que o mês
+movimentou por natureza da operação. Serve para conferir o estoque sem abrir
+nota por nota: cada linha é um CFOP, de um lado da nota, com quantas notas e
+quantas linhas ele teve, quanto entrou, quanto saiu, quanto era de terceiro e
+o valor das notas.
+
+Três escolhas explicam o que se vê ali:
+
+- **A base é a linha da nota, não o movimento.** O CFOP que não movimenta
+  estoque — simbólico, fora de escopo — aparece com zero em vez de sumir da
+  lista. Quem confere precisa ver que ele foi considerado, e não esquecido.
+- **Cada nota aparece pelos dois lados.** A transferência entre as suas filiais
+  entra uma vez como *emitiu* (saída) e outra como *recebeu* (entrada). O filtro
+  de lado isola uma ponta quando só ela interessa.
+- **A coluna *Sem mov.* é o furo.** É linha importada que não virou movimento.
+  Em CFOP simbólico ou fora de escopo isso é o esperado e vem em cinza; nos
+  demais vem em vermelho, e é o que falta resolver — normalmente item sem
+  de-para, o mesmo número do painel de bloqueios.
+
+Clicar num CFOP abre os **itens** e as **notas** daquela operação. Em julho/2026,
+por exemplo, o 5922 (faturamento de entrega futura) aparece com 8 linhas e
+nenhum movimento: correto, porque quem movimenta estoque é a remessa 5117.
+
 ### Quando o mês aparece só com saídas
 
 Quase nunca é o sistema errando: é nota que foi importada e **não chegou ao

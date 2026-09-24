@@ -183,6 +183,18 @@ def _periodo_params(qs):
             "p_origem": origem if origem in ("nfe", "") else "nfe"}
 
 
+def rota_cfop_detalhe(qs, funcao):
+    """Itens ou notas de um CFOP do mes. Sem CFOP na consulta nao ha o que ver."""
+    cfop = re.sub(r"\D", "", (qs.get("cfop") or [""])[0])[:4]
+    if not cfop:
+        return []
+    p = dict(_faturamento_params(qs), p_cfop=cfop)
+    lado = (qs.get("lado") or [""])[0]
+    if lado in ("emitente", "destino"):
+        p["p_lado"] = lado
+    return consulta_rest(f"rpc/{funcao}", p)
+
+
 def rota_periodo(qs):
     """
     Movimentacao do mes, todo item comecando em zero. Funcao STABLE: o
@@ -379,6 +391,12 @@ ROTAS = {
     "/api/periodo/bloqueios": lambda qs: consulta_rest(
         "rpc/periodo_bloqueios",
         dict(zip(("p_ini", "p_fim"), _mes(qs)))),
+    "/api/periodo/cfops": lambda qs: consulta_rest(
+        "rpc/conferencia_cfop", _faturamento_params(qs)),
+    "/api/periodo/cfop/itens": lambda qs: rota_cfop_detalhe(
+        qs, "conferencia_cfop_itens"),
+    "/api/periodo/cfop/notas": lambda qs: rota_cfop_detalhe(
+        qs, "conferencia_cfop_notas"),
     "/api/periodo/meses": lambda qs: consulta_rest(
         "v_meses_movimento", {"order": "mes.desc"}),
 }
