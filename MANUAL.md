@@ -339,6 +339,12 @@ Três escolhas explicam o que se vê ali:
   demais vem em vermelho, e é o que falta resolver — normalmente item sem
   de-para, o mesmo número do painel de bloqueios.
 
+Os filtros acima da tabela escolhem **um CFOP** (a lista é a dos CFOP que o mês
+teve naquela filial, não um catálogo), **um lado** da nota e, se quiser, só os
+CFOP com linha parada. Trocar de mês ou de filial pode extinguir o CFOP
+escolhido; nesse caso o filtro volta sozinho para *todos*, em vez de deixar a
+tabela vazia sem explicação.
+
 Clicar num CFOP abre os **itens** e as **notas** daquela operação. Em julho/2026,
 por exemplo, o 5922 (faturamento de entrega futura) aparece com 8 linhas e
 nenhum movimento: correto, porque quem movimenta estoque é a remessa 5117.

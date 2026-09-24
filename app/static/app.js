@@ -45,13 +45,15 @@ function brDate(iso) {
 function fill(id, rows, tpl, extra) {
   const t = document.getElementById(id);
   const tb = t.querySelector('tbody');
+  // O rodapé sai antes do desvio: sem isso, filtrar até não sobrar nada
+  // deixava na tela o total da filtragem anterior.
+  const old = t.querySelector('tfoot');
+  if (old) old.remove();
   if (!rows || !rows.length) {
     tb.innerHTML = `<tr><td colspan="99" class="skel">nenhum registro</td></tr>`;
     return;
   }
   tb.innerHTML = rows.map(r => '<tr>' + tpl(r) + '</tr>').join('');
-  const old = t.querySelector('tfoot');
-  if (old) old.remove();
   if (extra) t.insertAdjacentHTML('beforeend', extra);
 }
 

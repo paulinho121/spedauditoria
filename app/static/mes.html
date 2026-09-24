@@ -127,6 +127,9 @@ td.neg, .neg { color: var(--error); font-variant-numeric: tabular-nums; }
 
   <h2 class="sec">Operações por CFOP <small id="cfop-escopo"></small></h2>
   <div class="controls" style="margin:0 0 12px">
+    <select id="cfop-qual">
+      <option value="">Todos os CFOP do mês</option>
+    </select>
     <select id="cfop-lado">
       <option value="">Os dois lados da nota</option>
       <option value="emitente">Só o que a filial emitiu</option>
@@ -440,16 +443,40 @@ const EFEITO = {
   nao_classificado: ['CFOP ainda sem classificação', 'err'],
 };
 
+let cfopRows = [];
+
 async function carregarCfops(mes, uf) {
   $('cfop-escopo').textContent =
     `${uf ? 'filial ' + uf : 'todas as filiais'} · ${rotuloMes(mes)}`;
-  let rows;
   try {
-    rows = await api(`/api/periodo/cfops?mes=${mes}&uf=${encodeURIComponent(uf)}`);
+    cfopRows = await api(`/api/periodo/cfops?mes=${mes}&uf=${encodeURIComponent(uf)}`);
   } catch (e) { return falha(e); }
+  listarCfops();
+  desenharCfops(mes, uf);
+}
 
-  const lado = $('cfop-lado').value;
-  const vistas = rows.filter(r => (!lado || r.lado === lado) &&
+/**
+ * A lista de CFOP é a do próprio mês e filial — não um catálogo. Oferecer CFOP
+ * que não teve operação só daria tabela vazia.
+ */
+function listarCfops() {
+  const sel = $('cfop-qual');
+  const antes = sel.value;
+  const unicos = [...new Map(cfopRows.map(r => [r.cfop, r.descricao]))]
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  sel.innerHTML = '<option value="">Todos os CFOP do mês</option>' +
+    unicos.map(([c, d]) =>
+      `<option value="${esc(c)}">${esc(c)} — ${esc((d || '').slice(0, 58))}</option>`).join('');
+  // Trocar de mês ou de filial pode extinguir o CFOP escolhido; nesse caso
+  // volta para todos, em vez de deixar a tela vazia sem explicação.
+  sel.value = unicos.some(([c]) => c === antes) ? antes : '';
+}
+
+function desenharCfops(mes, uf) {
+  const lado = $('cfop-lado').value, qual = $('cfop-qual').value;
+  const vistas = cfopRows.filter(r =>
+    (!qual || r.cfop === qual) &&
+    (!lado || r.lado === lado) &&
     (!$('cfop-parados').checked || +r.linhas > +r.linhas_com_movimento));
   const soma = c => vistas.reduce((a, r) => a + +r[c], 0);
   const paradas = soma('linhas') - soma('linhas_com_movimento');
@@ -565,8 +592,8 @@ const redesenha = () => {
 ['mes', 'uf', 'situacao', 'ordem'].forEach(id => $(id).onchange = redesenha);
 // O filtro do CFOP redesenha só a sua tabela: refazer o mês inteiro a cada
 // clique custaria três consultas para trocar uma coluna de lugar.
-['cfop-lado', 'cfop-parados'].forEach(
-  id => $(id).onchange = () => carregarCfops($('mes').value, $('uf').value));
+['cfop-qual', 'cfop-lado', 'cfop-parados'].forEach(
+  id => $(id).onchange = () => desenharCfops($('mes').value, $('uf').value));
 $('q').oninput = redesenha;
 $('limpar').onclick = () => {
   $('q').value = ''; $('uf').value = ''; $('situacao').value = '';
