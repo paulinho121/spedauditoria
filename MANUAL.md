@@ -561,6 +561,15 @@ isso a abertura do ERP é confrontada com a nossa posição na véspera.
 **antes** do período do extrato — e é lá que se investiga, não no mês que está
 na tela.
 
+Se o trabalho **não tiver nenhuma nota nossa no período do extrato**, a tela
+avisa no alto: tudo apareceria como *só no ERP*, e isso não seria divergência,
+seria ausência. Importe os XML do período antes de ler as duas primeiras abas.
+A terceira continua valendo — ela não depende da nossa apuração.
+
+Item que não se moveu no mês **não aparece no extrato**, porque o relatório
+lista o que teve movimento. Isso não é divergência: esses itens vêm marcados
+*parado no mês* e ficam fora do filtro *Só o que não bate*.
+
 A terceira aba não depende da nossa apuração: aponta **movimento sem documento
 fiscal** (estoque que andou no ERP sem nota), **custo médio que salta mais de
 50%** de um lançamento para o outro e **quantidade fora de escala** — cem vezes

@@ -82,6 +82,8 @@ td.igual { color: var(--on-surface-variant); }
     <span class="muted" id="arq-info"></span>
   </div>
 
+  <div id="aviso" hidden class="card alert" style="margin-bottom:16px"></div>
+
   <section class="grid kpis" id="kpis"><div class="skel">nenhum extrato importado ainda</div></section>
 
   <div class="abas" id="abas">
@@ -100,6 +102,7 @@ td.igual { color: var(--on-surface-variant); }
         <option value="valor_difere">Valor diferente</option>
         <option value="so_erp">Só no ERP</option>
         <option value="so_nosso">Só na nossa apuração</option>
+        <option value="sem_movimento">Parado no mês nos dois</option>
         <option value="confere">Confere</option>
       </select>
     </div>
@@ -189,6 +192,7 @@ const SIT_ITEM = {
   valor_difere: ['valor difere', 'warn'],
   so_erp: ['só no ERP', 'err'],
   so_nosso: ['só na nossa apuração', 'err'],
+  sem_movimento: ['parado no mês', ''],
 };
 const SIT_DOC = {
   confere: ['confere', 'ok'],
@@ -236,10 +240,32 @@ async function carregar(id) {
     `${a.linhas} linhas · ${a.itens} itens · ${a.movimentos} movimentos · ` +
     `${brDate(a.dt_ini)} a ${brDate(a.dt_fin)}` + (a.uf ? ` · filial ${a.uf}` : '');
 
+  // Período sem nota nossa não produz divergência: produz tela enganosa. O
+  // confronto só tem sentido com os dois lados, e isso tem de vir antes dos
+  // números, não depois.
+  const semNosso = r && +r.nossas_notas === 0;
+  $('aviso').hidden = !semNosso;
+  if (semNosso) {
+    $('aviso').innerHTML = `<div class="lbl">Falta o outro lado do confronto</div>
+      <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
+      Não há <b>nenhuma nota nossa</b> entre ${brDate(a.dt_ini)} e ${brDate(a.dt_fin)}
+      nesta filial: os XML deste período não foram importados neste trabalho.
+      Tudo abaixo vai aparecer como <i>só no ERP</i> — e isso não é divergência,
+      é ausência. Importe os XML do período na tela
+      <a href="/importar">Importar</a> e volte aqui. A aba
+      <b>“O que o extrato denuncia”</b> continua valendo: ela não depende da
+      nossa apuração.</p>`;
+  }
+
   const naoBate = r ? +r.saldo_difere + +r.so_erp + +r.so_nosso : 0;
   $('kpis').innerHTML = [
+    card('Notas nossas no período', n(r ? r.nossas_notas : 0),
+         semNosso ? 'nenhuma — o confronto está de um lado só'
+                  : `${n(r ? r.nossos_movimentos : 0)} movimentos`,
+         semNosso ? 'alert' : ''),
     card('Itens no confronto', n(r ? r.itens : 0),
-         `${n(r ? r.confere : 0)} conferem`, naoBate ? '' : 'good'),
+         `${n(r ? r.confere : 0)} conferem · ${n(r ? r.sem_movimento : 0)} parados`,
+         naoBate ? '' : 'good'),
     card('Saldo final diferente', n(r ? r.saldo_difere : 0),
          'mesma data, quantidade diferente', +(r || {}).saldo_difere ? 'alert' : 'good'),
     card('Item só de um lado', n(r ? +r.so_erp + +r.so_nosso : 0),
@@ -268,7 +294,8 @@ async function carregar(id) {
 function desenharItens() {
   const f = $('f-item').value;
   const vistas = dados.itens.filter(x =>
-    f === 'divergente' ? x.situacao !== 'confere' : (!f || x.situacao === f));
+    f === 'divergente' ? !['confere', 'sem_movimento'].includes(x.situacao)
+                       : (!f || x.situacao === f));
   fill('tbl-itens', vistas, x => {
     const [txt, cls] = SIT_ITEM[x.situacao] || [x.situacao, ''];
     return `
