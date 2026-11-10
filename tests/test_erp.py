@@ -158,6 +158,41 @@ def test_confere_acusa_saldo_que_nao_fecha():
     assert "item 30" in probs[0][1]
 
 
+def test_le_a_coluna_de_ncm_quando_o_erp_a_exporta():
+    """
+    O relatório é montado pelo usuário do ERP. Acrescentar uma coluna de NCM —
+    no meio das outras, inclusive — não pode deslocar a leitura do resto.
+    """
+    cab = CABECALHO[:5] + ["NCM"] + CABECALHO[5:]
+    linhas = [cab] + [l[:5] + ["9405.99.00"] + l[5:] for l in LINHAS[1:]]
+    e = erp.parse(planilha_sintetica(linhas))
+    assert erp.e_extrato_erp(planilha_sintetica(linhas))
+    assert e.linhas[0]["ncm"] == "94059900"     # ponto some, 8 dígitos ficam
+    # E o resto continua no lugar, que é o ponto do teste.
+    assert e.linhas[1]["doc_num"] == "579"
+    assert e.linhas[1]["qtd_saida"] == 2
+    assert e.linhas[1]["custo_saida"] == 54.34
+
+
+def test_ncm_ausente_ou_ilegivel_vira_nulo():
+    e = erp.parse(planilha_sintetica())
+    assert all(l["ncm"] is None for l in e.linhas)
+    cab = CABECALHO + ["Classificação fiscal"]
+    linhas = [cab] + [l + ["sem ncm"] for l in LINHAS[1:]]
+    assert erp.parse(planilha_sintetica(linhas)).linhas[0]["ncm"] is None
+
+
+def test_coluna_renomeada_e_reconhecida_pelo_nome():
+    """Acento, caixa e espaço não podem decidir se o arquivo é legível."""
+    cab = ["Agrupamento", "CH MOV", "Dt Mov", "Hr Mov", "DEPÓSITO",
+           "Ref. fabricante", "Ch Doc", "Operação de Origem#Documento",
+           "Operação de Origem#Tipo", "Operação de Origem#Entidade",
+           "Quantidade#Entrada", "Quantidade#Saída", "Quantidade#Saldo",
+           "Custo#Entrada", "Custo#Saída", "Custo#Saldo", "Custo Médio"]
+    e = erp.parse(planilha_sintetica([cab] + LINHAS[1:]))
+    assert e.itens == 3 and e.linhas[1]["custo_medio"] == 27.17
+
+
 def test_extrato_sem_problema_nao_inventa_achado():
     linhas = [l for l in LINHAS if not l[0].startswith("30 - ")]
     e = erp.parse(planilha_sintetica(linhas))

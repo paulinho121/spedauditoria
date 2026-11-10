@@ -103,13 +103,14 @@ td.igual { color: var(--on-surface-variant); }
         <option value="so_erp">Só no ERP</option>
         <option value="so_nosso">Só na nossa apuração</option>
         <option value="sem_movimento">Parado no mês nos dois</option>
+        <option value="sem_ncm">Sem NCM</option>
         <option value="confere">Confere</option>
       </select>
     </div>
     <div class="wrap">
       <table id="tbl-itens">
         <thead><tr>
-          <th>Código</th><th class="desc">Descrição</th>
+          <th>Código</th><th class="desc">Descrição</th><th>NCM</th>
           <th class="num">Abertura ERP</th><th class="num">Abertura nossa</th>
           <th class="num">Entrou ERP</th><th class="num">Entrou nosso</th>
           <th class="num">Saiu ERP</th><th class="num">Saiu nosso</th>
@@ -117,7 +118,7 @@ td.igual { color: var(--on-surface-variant); }
           <th class="num">Diferença</th><th class="num">Valor ERP</th>
           <th class="num">Valor nosso</th><th>Situação</th>
         </tr></thead>
-        <tbody><tr><td colspan="14" class="skel">—</td></tr></tbody>
+        <tbody><tr><td colspan="15" class="skel">—</td></tr></tbody>
       </table>
     </div>
     <p class="muted" style="font-size:12.5px;margin:10px 0 0;line-height:1.6">
@@ -286,6 +287,13 @@ async function carregar(id) {
     card('Alertas do próprio extrato', n(dados.alertas.length),
          'custo que pula, quantidade fora de escala',
          dados.alertas.length ? 'alert' : 'good'),
+    // Sem NCM não se audita tributação. O número precisa estar na tela mesmo
+    // quando o relatório do ERP não traz a coluna.
+    card('Itens sem NCM', n(r ? r.itens_sem_ncm : 0),
+         r && +r.ncm_do_erp
+           ? `${n(r.itens_com_ncm)} com NCM · ${n(r.ncm_do_erp)} vindos do próprio ERP`
+           : `${n(r ? r.itens_com_ncm : 0)} com NCM, todos do nosso cadastro`,
+         +(r || {}).itens_sem_ncm ? 'alert' : 'good'),
   ].join('');
 
   desenharItens(); desenharDocs(); desenharAlertas();
@@ -295,12 +303,16 @@ function desenharItens() {
   const f = $('f-item').value;
   const vistas = dados.itens.filter(x =>
     f === 'divergente' ? !['confere', 'sem_movimento'].includes(x.situacao)
-                       : (!f || x.situacao === f));
+    : f === 'sem_ncm' ? !x.ncm && x.situacao !== 'sem_movimento'
+                      : (!f || x.situacao === f));
   fill('tbl-itens', vistas, x => {
     const [txt, cls] = SIT_ITEM[x.situacao] || [x.situacao, ''];
     return `
       <td class="mono"><b>${esc(x.cod_item)}</b></td>
       <td class="desc">${esc((x.descr_item || '—').slice(0, 46))}</td>
+      <td class="mono">${x.ncm
+          ? esc(x.ncm) + ` <span class="chip" title="Origem do NCM">${esc(x.ncm_origem || '')}</span>`
+          : '<span class="muted" title="Nem o ERP nem o cadastro têm NCM para este código">—</span>'}</td>
       <td class="num">${n(x.erp_inicial)}</td>
       <td class="num ${+x.dif_inicial ? 'dif' : 'igual'}">${n(x.nosso_inicial)}</td>
       <td class="num">${n(x.erp_entradas)}</td>
@@ -313,7 +325,7 @@ function desenharItens() {
       <td class="num">${money(x.erp_valor)}</td>
       <td class="num">${money(x.nosso_valor)}</td>
       <td><span class="chip ${cls}">${txt}</span></td>`;
-  }, vistas.length ? `<tfoot><tr><td colspan="8">${n(vistas.length)} item(ns)</td>
+  }, vistas.length ? `<tfoot><tr><td colspan="9">${n(vistas.length)} item(ns)</td>
       <td class="num">${n(vistas.reduce((a, x) => a + +x.erp_final, 0))}</td>
       <td class="num">${n(vistas.reduce((a, x) => a + +x.nosso_final, 0))}</td>
       <td class="num">${dif(vistas.reduce((a, x) => a + +x.dif_final, 0))}</td>

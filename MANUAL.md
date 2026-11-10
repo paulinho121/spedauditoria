@@ -549,6 +549,25 @@ O **depósito vira filial** pela UF no fim do nome (`DEP MCI SP` → SP). O
 **período** sai dos próprios movimentos, do primeiro ao último dia do mês — por
 isso a abertura do ERP é confrontada com a nossa posição na véspera.
 
+**NCM.** A aba *Item a item* tem a coluna de NCM, com a origem ao lado. Se o
+relatório do ERP trouxer uma coluna de NCM, ela é lida automaticamente — a
+leitura é pelo **nome** da coluna, não pela posição, então acrescentar colunas
+ao export não quebra nada. Quando o relatório não traz, o NCM é buscado **pelo
+código** no nosso cadastro, nesta ordem:
+
+| Origem | O que é |
+|---|---|
+| **EFD 0200** | O que a empresa declarou ao fisco — é o que vale |
+| **XML** | O que ela imprimiu na nota |
+| **ERP** | O cadastro do ERP, que ninguém conferiu |
+
+Item sem NCM em nenhuma dessas fontes aparece com `—`: **sem NCM não se audita
+tributação**, e inventar um seria pior que deixar o furo visível. O NCM de
+outra filial **não** é usado para preencher o da filial em questão — o mesmo
+código às vezes está classificado de forma diferente em cada uma, e isso é
+achado, não fonte. Quando o ERP traz NCM e ele difere do declarado, a
+divergência é listada à parte.
+
 **Três confrontos**, do mais grosso ao mais fino:
 
 | Aba | O que mostra |
