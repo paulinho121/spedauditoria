@@ -90,6 +90,7 @@ td.igual { color: var(--on-surface-variant); }
     <button data-aba="itens" class="on">Item a item</button>
     <button data-aba="documentos">Nota a nota</button>
     <button data-aba="alertas">O que o extrato denuncia</button>
+    <button id="exportar" style="margin-left:auto">Exportar ↓</button>
   </div>
 
   <section id="aba-itens">
@@ -299,12 +300,15 @@ async function carregar(id) {
   desenharItens(); desenharDocs(); desenharAlertas();
 }
 
+let vistasItens = [], vistasDocs = [];
+
 function desenharItens() {
   const f = $('f-item').value;
   const vistas = dados.itens.filter(x =>
     f === 'divergente' ? !['confere', 'sem_movimento'].includes(x.situacao)
     : f === 'sem_ncm' ? !x.ncm && x.situacao !== 'sem_movimento'
                       : (!f || x.situacao === f));
+  vistasItens = vistas;
   fill('tbl-itens', vistas, x => {
     const [txt, cls] = SIT_ITEM[x.situacao] || [x.situacao, ''];
     return `
@@ -338,6 +342,7 @@ function desenharDocs() {
   const f = $('f-doc').value;
   const vistas = dados.documentos.filter(x =>
     f === 'divergente' ? x.situacao !== 'confere' : (!f || x.situacao === f));
+  vistasDocs = vistas;
   fill('tbl-docs', vistas, x => {
     const [txt, cls] = SIT_DOC[x.situacao] || [x.situacao, ''];
     return `
@@ -411,6 +416,85 @@ async function enviar(arquivos) {
     $('prog').hidden = true;
   }
 }
+
+/* ------------------------------------------------------------- exportação */
+// As colunas de cada aba, na ordem em que aparecem na tela. O rótulo é o
+// mesmo do cabeçalho: quem conferiu na tela tem de reconhecer no arquivo.
+const COLUNAS_EXP = {
+  itens: [
+    { campo: 'cod_item', rotulo: 'Código' },
+    { campo: 'descr_item', rotulo: 'Descrição' },
+    { campo: 'ncm', rotulo: 'NCM' },
+    { campo: 'ncm_origem', rotulo: 'Origem do NCM', marcada: false },
+    { campo: 'unid', rotulo: 'Unidade', marcada: false },
+    { campo: 'erp_custo_medio', rotulo: 'Custo médio (ERP)', tipo: 'dinheiro' },
+    { campo: 'erp_inicial', rotulo: 'Abertura ERP', tipo: 'numero' },
+    { campo: 'nosso_inicial', rotulo: 'Abertura nossa', tipo: 'numero' },
+    { campo: 'erp_entradas', rotulo: 'Entrou ERP', tipo: 'numero' },
+    { campo: 'nossas_entradas', rotulo: 'Entrou nosso', tipo: 'numero' },
+    { campo: 'erp_saidas', rotulo: 'Saiu ERP', tipo: 'numero' },
+    { campo: 'nossas_saidas', rotulo: 'Saiu nosso', tipo: 'numero' },
+    { campo: 'erp_final', rotulo: 'Saldo ERP', tipo: 'numero' },
+    { campo: 'nosso_final', rotulo: 'Saldo nosso', tipo: 'numero' },
+    { campo: 'dif_final', rotulo: 'Diferença', tipo: 'numero' },
+    { campo: 'erp_valor', rotulo: 'Valor ERP', tipo: 'dinheiro' },
+    { campo: 'nosso_valor', rotulo: 'Valor nosso', tipo: 'dinheiro' },
+    { campo: 'situacao_txt', rotulo: 'Situação' },
+  ],
+  documentos: [
+    { campo: 'dt_txt', rotulo: 'Data', tipo: 'data' },
+    { campo: 'num_nf', rotulo: 'NF' },
+    { campo: 'cod_item', rotulo: 'Código' },
+    { campo: 'descr_item', rotulo: 'Descrição' },
+    { campo: 'tipo', rotulo: 'Operação no ERP' },
+    { campo: 'contraparte', rotulo: 'Contraparte' },
+    { campo: 'cfop', rotulo: 'CFOP' },
+    { campo: 'erp_entrada', rotulo: 'Entrou ERP', tipo: 'numero' },
+    { campo: 'nossa_entrada', rotulo: 'Entrou nosso', tipo: 'numero' },
+    { campo: 'erp_saida', rotulo: 'Saiu ERP', tipo: 'numero' },
+    { campo: 'nossa_saida', rotulo: 'Saiu nosso', tipo: 'numero' },
+    { campo: 'diferenca', rotulo: 'Diferença', tipo: 'numero' },
+    { campo: 'situacao_txt', rotulo: 'Situação' },
+  ],
+  alertas: [
+    { campo: 'titulo', rotulo: 'O que foi encontrado' },
+    { campo: 'cod_item', rotulo: 'Código' },
+    { campo: 'descr_item', rotulo: 'Descrição' },
+    { campo: 'dt_txt', rotulo: 'Data', tipo: 'data' },
+    { campo: 'doc', rotulo: 'Documento' },
+    { campo: 'detalhe', rotulo: 'Detalhe' },
+    { campo: 'quantidade', rotulo: 'Quantidade', tipo: 'numero' },
+    { campo: 'valor', rotulo: 'Valor', tipo: 'dinheiro' },
+  ],
+};
+
+function abaAtiva() {
+  const b = $('abas').querySelector('[data-aba].on');
+  return b ? b.dataset.aba : 'itens';
+}
+
+$('exportar').onclick = () => {
+  if (!dados || !dados.arquivo) return;
+  const aba = abaAtiva();
+  const a = dados.arquivo;
+  // A situação vai para o arquivo com o mesmo texto que está na tela: código
+  // interno ('saldo_difere') não diz nada a quem recebe o relatório.
+  const rotulo = (mapa, x) => (mapa[x.situacao] || [x.situacao])[0];
+  const linhas =
+    aba === 'itens' ? vistasItens.map(x => ({ ...x, situacao_txt: rotulo(SIT_ITEM, x) }))
+    : aba === 'documentos' ? vistasDocs.map(x => ({ ...x, situacao_txt: rotulo(SIT_DOC, x) }))
+    : dados.alertas;
+  const nomeAba = { itens: 'Item a item', documentos: 'Nota a nota',
+                    alertas: 'Alertas do extrato' }[aba];
+  painelExportar({
+    titulo: `Extrato do ERP — ${nomeAba}`,
+    subtitulo: `${a.deposito || ''} · filial ${a.uf || '—'} · ` +
+               `${brDate(a.dt_ini)} a ${brDate(a.dt_fin)} · ${a.nome_arquivo}`,
+    aba: nomeAba,
+    colunas: COLUNAS_EXP[aba],
+    linhas,
+  });
+};
 
 $('drop').onclick = () => $('file').click();
 $('file').onchange = e => enviar(e.target.files);

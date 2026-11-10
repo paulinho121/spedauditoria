@@ -253,6 +253,45 @@ def sql_periodo_bloqueios(mes):
     return f"select * from periodo_bloqueios({ini}, {fim})"
 
 
+LIMITE_EXPORTACAO = 20000
+
+
+def exportar(body):
+    """
+    Exporta em .xlsx ou .pdf a tabela que está na tela, com as colunas que o
+    usuário marcou.
+
+    As linhas vêm do navegador, e não de uma consulta refeita aqui: o que sai
+    no arquivo é exatamente o que está sendo visto, com o mesmo filtro e a
+    mesma ordem. Refazer a consulta no servidor abriria espaço para o relatório
+    discordar da tela — e é a tela que a pessoa conferiu.
+    """
+    _sobe_auditoria()
+    import base64
+    from auditoria import exporta
+
+    b = body or {}
+    formato = (b.get("formato") or "xlsx").lower()
+    if formato not in ("xlsx", "pdf"):
+        return {"erro": "formato deve ser xlsx ou pdf"}
+    colunas = [c for c in (b.get("colunas") or []) if c.get("campo")]
+    linhas = b.get("linhas") or []
+    if not colunas:
+        return {"erro": "marque ao menos uma coluna"}
+    if len(linhas) > LIMITE_EXPORTACAO:
+        return {"erro": f"são {len(linhas)} linhas; o limite da exportação é "
+                        f"{LIMITE_EXPORTACAO}. Filtre antes de exportar."}
+    titulo = (b.get("titulo") or "Relatório").strip()[:120]
+    sub = (b.get("subtitulo") or "").strip()[:200]
+
+    dados = (exporta.xlsx(titulo, colunas, linhas, b.get("aba") or "Relatório")
+             if formato == "xlsx" else exporta.pdf(titulo, sub, colunas, linhas))
+    return {"nome": exporta.nome_arquivo(titulo, formato),
+            "tipo": ("application/vnd.openxmlformats-officedocument."
+                     "spreadsheetml.sheet" if formato == "xlsx" else "application/pdf"),
+            "base64": base64.b64encode(dados).decode(), "linhas": len(linhas)}
+
+
 def erp_arquivos(qs):
     """Extratos do ERP já importados, do mais recente para o mais antigo."""
     return query(
@@ -540,6 +579,7 @@ def trabalho_excluir(body):
 
 
 POSTS = {"/api/import/pasta": importar_pasta, "/api/import/upload": importar_upload,
+         "/api/exportar": exportar,
          "/api/achados/status": mudar_status, "/api/varrer": rodar_varredura,
          "/api/trabalhos/usar": trabalho_usar, "/api/trabalhos/novo": trabalho_novo,
          "/api/trabalhos/excluir": trabalho_excluir}

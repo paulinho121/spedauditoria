@@ -515,6 +515,40 @@ def post_achado_status(corpo, u):
         "p_nota": (corpo or {}).get("nota") or None}))
 
 
+LIMITE_EXPORTACAO = 20000
+
+
+def post_exportar(corpo, u):
+    """
+    Exporta em .xlsx ou .pdf a tabela que está na tela, com as colunas
+    marcadas. As linhas vêm do navegador: o arquivo é exatamente o que está
+    sendo visto, com o mesmo filtro e a mesma ordem.
+    """
+    _sobe_auditoria()
+    import base64
+    from auditoria import exporta
+
+    b = corpo or {}
+    formato = (b.get("formato") or "xlsx").lower()
+    if formato not in ("xlsx", "pdf"):
+        raise Erro("formato deve ser xlsx ou pdf")
+    colunas = [c for c in (b.get("colunas") or []) if c.get("campo")]
+    linhas = b.get("linhas") or []
+    if not colunas:
+        raise Erro("marque ao menos uma coluna")
+    if len(linhas) > LIMITE_EXPORTACAO:
+        raise Erro(f"são {len(linhas)} linhas; o limite da exportação é "
+                   f"{LIMITE_EXPORTACAO}. Filtre antes de exportar.")
+    titulo = (b.get("titulo") or "Relatório").strip()[:120]
+    sub = (b.get("subtitulo") or "").strip()[:200]
+    dados = (exporta.xlsx(titulo, colunas, linhas, b.get("aba") or "Relatório")
+             if formato == "xlsx" else exporta.pdf(titulo, sub, colunas, linhas))
+    return {"nome": exporta.nome_arquivo(titulo, formato),
+            "tipo": ("application/vnd.openxmlformats-officedocument."
+                     "spreadsheetml.sheet" if formato == "xlsx" else "application/pdf"),
+            "base64": base64.b64encode(dados).decode(), "linhas": len(linhas)}
+
+
 def post_varrer(corpo, u):
     return um(chama_funcao("varrer", {
         "p_data": str((corpo or {}).get("data") or "2022-12-31"),
@@ -528,7 +562,8 @@ POSTS = {"/api/trabalhos/usar": post_trabalho_usar,
          "/api/trabalhos/novo": post_trabalho_novo,
          "/api/trabalhos/excluir": post_trabalho_excluir,
          "/api/achados/status": post_achado_status,
-         "/api/varrer": post_varrer}
+         "/api/varrer": post_varrer,
+         "/api/exportar": post_exportar}
 
 
 def _sobe_auditoria():

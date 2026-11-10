@@ -63,7 +63,16 @@ def linhas(caminho, aba=None):
             raise ValueError(f"{caminho}: não achei a aba {aba or i}")
         compartilhados = _textos(z)
         raiz = ET.fromstring(z.read(alvo))
+        esperada = 1
         for row in raiz.iter(f"{NS}row"):
+            # Linha em branco não tem <row> no arquivo. Pular direto para a
+            # próxima deslocaria tudo o que vem depois — e a planilha do ERP
+            # separa blocos com linha vazia. O número da linha é o do arquivo.
+            atual = int(row.get("r") or esperada)
+            while esperada < atual:
+                esperada += 1
+                yield []
+            esperada = atual + 1
             saida = []
             for c in row.findall(f"{NS}c"):
                 pos = _coluna(c.get("r"))

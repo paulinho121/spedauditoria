@@ -596,6 +596,28 @@ o saldo que o item tinha na linha anterior, ou quantidade quebrada em item
 contado por unidade. O custo médio alimenta o CMV: um salto desses muda o
 resultado do mês.
 
+### Exportar o relatório (.xlsx ou PDF)
+
+O botão **Exportar ↓**, na barra de abas, abre um painel onde você **marca as
+colunas** que quer no relatório — código, descrição, NCM e preço, por exemplo —
+e escolhe o formato.
+
+**Sai o que está na tela**: a aba aberta, com o filtro aplicado e na mesma
+ordem. O servidor não refaz a consulta, de propósito — relatório que discorda
+da tela que você conferiu não serve de papel de trabalho.
+
+| Formato | Para que serve |
+|---|---|
+| **.xlsx** | Planilha com **número como número** — soma, filtra e ordena no Excel |
+| **PDF** | Paisagem, cabeçalho repetido em toda página — para anexar ao papel de trabalho |
+
+O arquivo leva o título, a filial, o período e o nome do extrato de origem no
+cabeçalho, e o rodapé do PDF traz a contagem de linhas e a paginação. O nome do
+arquivo sai sem acento e com a data (`extrato_do_erp_item_a_item_20261110.xlsx`),
+porque ele vai virar anexo de e-mail.
+
+O limite é de 20.000 linhas por exportação; acima disso, filtre antes.
+
 O sistema também confere o extrato **contra ele mesmo**: o saldo impresso em
 cada linha tem de ser o anterior mais a entrada menos a saída. Quando não
 fecha, o aviso aparece na importação — esse número não pode ser usado para

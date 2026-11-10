@@ -308,3 +308,90 @@ function abrirPainel(titulo, meta) {
   fundo.querySelector('.painel-fechar').focus();
   return { corpo: fundo.querySelector('.painel-corpo'), fechar };
 }
+
+/* ---------- exportação de uma tabela ----------
+ * O relatório sai do sistema e vai para o cliente, para o fisco ou para o
+ * processo. Duas decisões moldam este painel:
+ *
+ *  1. Sai o que está na TELA — mesmo filtro, mesma ordem, mesmas linhas. O
+ *     servidor não refaz a consulta: relatório que discorda da tela que a
+ *     pessoa conferiu não serve de papel de trabalho.
+ *  2. As colunas são escolhidas na hora. Um extrato tem vinte colunas; o
+ *     relatório que se manda para alguém costuma ter quatro.
+ *
+ * spec = { titulo, subtitulo, aba, colunas: [{campo, rotulo, tipo}], linhas }
+ * tipo: 'texto' (padrão) · 'numero' · 'dinheiro' · 'data'
+ */
+function painelExportar(spec) {
+  const cols = spec.colunas || [], linhas = spec.linhas || [];
+  const p = abrirPainel('Exportar relatório',
+    `${esc(spec.titulo || '')} · ${n(linhas.length)} linha(s), como estão na tela`);
+  p.corpo.innerHTML = `
+    <div class="controls" style="margin-bottom:10px">
+      <button type="button" id="exp-todas">Marcar todas</button>
+      <button type="button" id="exp-nenhuma">Limpar</button>
+    </div>
+    <div class="multi-lista" style="position:static;max-height:300px;min-width:0;
+         box-shadow:none;margin-bottom:16px">
+      ${cols.map((c, i) => `<label>
+          <input type="checkbox" value="${i}"${c.marcada === false ? '' : ' checked'}>
+          <span>${esc(c.rotulo || c.campo)}</span>
+          ${c.tipo && c.tipo !== 'texto'
+            ? `<span class="muted" style="font-size:11px">${esc(c.tipo)}</span>` : ''}
+        </label>`).join('')}
+    </div>
+    <div class="controls">
+      <button class="pri" id="exp-xlsx">Baixar .xlsx</button>
+      <button id="exp-pdf">Baixar PDF</button>
+      <span class="muted" id="exp-aviso"></span>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin:14px 0 0;line-height:1.6">
+      A planilha sai com <b>número como número</b>, para somar e filtrar no Excel.
+      O PDF sai em paisagem, com o cabeçalho repetido em toda página — é o
+      formato de anexar ao papel de trabalho.
+    </p>`;
+
+  const caixas = () => [...p.corpo.querySelectorAll('input[type=checkbox]')];
+  p.corpo.querySelector('#exp-todas').onclick = () => caixas().forEach(c => c.checked = true);
+  p.corpo.querySelector('#exp-nenhuma').onclick = () => caixas().forEach(c => c.checked = false);
+
+  const baixar = async formato => {
+    const escolhidas = caixas().filter(c => c.checked).map(c => cols[+c.value]);
+    const aviso = p.corpo.querySelector('#exp-aviso');
+    if (!escolhidas.length) { aviso.textContent = 'Marque ao menos uma coluna.'; return; }
+    aviso.textContent = 'Gerando…';
+    try {
+      const r = await apiPost('/api/exportar', {
+        formato, titulo: spec.titulo || 'Relatório', subtitulo: spec.subtitulo || '',
+        aba: spec.aba || 'Relatório',
+        colunas: escolhidas.map(c => ({ campo: c.campo, rotulo: c.rotulo || c.campo,
+                                        tipo: c.tipo || 'texto' })),
+        // Só os campos escolhidos sobem: não há razão para mandar o resto.
+        linhas: linhas.map(l => Object.fromEntries(
+          escolhidas.map(c => [c.campo, l[c.campo]]))),
+      });
+      baixarBase64(r.nome, r.tipo, r.base64);
+      aviso.textContent = `${r.nome} · ${n(r.linhas)} linha(s)`;
+    } catch (e) {
+      aviso.innerHTML = `<span style="color:var(--error)">${esc(e.message)}</span>`;
+    }
+  };
+  p.corpo.querySelector('#exp-xlsx').onclick = () => baixar('xlsx');
+  p.corpo.querySelector('#exp-pdf').onclick = () => baixar('pdf');
+  return p;
+}
+
+/** Bytes vindos do servidor viram download, sem passar por servidor de arquivos. */
+function baixarBase64(nome, tipo, b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: tipo }));
+  const a = document.createElement('a');
+  a.href = url; a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revogar na hora cancelaria o download em alguns navegadores.
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
