@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Extrato do ERP — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.drop { border: 2px dashed var(--outline-variant); border-radius: var(--r-lg);
+        padding: var(--lg); text-align: center; cursor: pointer;
+        background: var(--surface-lowest); }
+.drop:hover, .drop.on { border-color: var(--primary); background: var(--surface-low); }
+.drop h3 { margin: 0 0 4px; font-family: var(--head); }
+.drop p { margin: 0; color: var(--on-surface-variant); font-size: 13px; }
+#log { font: 12.5px/1.6 var(--mono); max-height: 240px; overflow: auto; margin-top: 12px; }
+#log .err { color: var(--error); }
+#log .warn { color: var(--warn-fg); }
+#log .mut { color: var(--on-surface-variant); }
+td.dif { color: var(--error); font-weight: 700; font-variant-numeric: tabular-nums; }
+td.igual { color: var(--on-surface-variant); }
+.abas { display: flex; gap: 4px; margin: 20px 0 0; flex-wrap: wrap; }
+.abas button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Extrato do ERP × apuração pelos XML</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Reconstrução</a>
+    <a href="/mes">Mês</a>
+    <a href="/apuracao">Apuração</a>
+    <a href="/resultado">Resultado</a>
+    <a href="/importar">Importar</a>
+    <a class="on" href="/erp">ERP</a>
+    <a href="/achados">Achados</a>
+    <a href="/relatorio">Relatório</a>
+    <a href="/manual">Manual</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
+    <div class="lbl">Para que serve esta tela</div>
+    <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
+      O <b>extrato de produtos por depósito</b> é o Kardex do ERP — a versão do
+      cliente da mesma história que apuramos pelos XML. O extrato <b>não vira
+      movimento</b>: ele fica guardado ao lado da nossa apuração, nunca dentro
+      dela. Se o número do ERP entrasse no Kardex, a conferência estaria
+      comparando o ERP com ele mesmo. Onde as duas versões discordam é onde se
+      olha.
+    </p>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="lbl">Enviar o extrato do ERP</div>
+    <div class="drop" id="drop" style="margin-top:12px">
+      <h3>Arraste a planilha aqui</h3>
+      <p>ou clique para escolher — .xlsx exportado do ERP
+         ("Extrato de produtos por depósito, produto e lote")</p>
+      <input type="file" id="file" multiple accept=".xlsx,.xlsm" hidden>
+    </div>
+    <progress id="prog" value="0" max="100" hidden style="width:100%;margin-top:10px"></progress>
+    <div id="log"></div>
+    <div class="foot muted" style="margin-top:10px">
+      O depósito vira filial pela UF no fim do nome (<span class="mono">DEP MCI SP</span> → SP).
+      O período sai dos próprios movimentos, do primeiro ao último dia do mês.
+      Reenviar o mesmo arquivo não duplica nada; um extrato novo do mesmo
+      depósito e período substitui o anterior, que fica guardado.
+    </div>
+  </div>
+
+  <div class="controls">
+    <select id="arquivo"><option>carregando…</option></select>
+    <span class="muted" id="arq-info"></span>
+  </div>
+
+  <section class="grid kpis" id="kpis"><div class="skel">nenhum extrato importado ainda</div></section>
+
+  <div class="abas" id="abas">
+    <button data-aba="itens" class="on">Item a item</button>
+    <button data-aba="documentos">Nota a nota</button>
+    <button data-aba="alertas">O que o extrato denuncia</button>
+  </div>
+
+  <section id="aba-itens">
+    <div class="controls" style="margin:12px 0">
+      <select id="f-item">
+        <option value="divergente">Só o que não bate</option>
+        <option value="">Todos os itens</option>
+        <option value="saldo_difere">Saldo final diferente</option>
+        <option value="abertura_difere">Abertura diferente</option>
+        <option value="valor_difere">Valor diferente</option>
+        <option value="so_erp">Só no ERP</option>
+        <option value="so_nosso">Só na nossa apuração</option>
+        <option value="confere">Confere</option>
+      </select>
+    </div>
+    <div class="wrap">
+      <table id="tbl-itens">
+        <thead><tr>
+          <th>Código</th><th class="desc">Descrição</th>
+          <th class="num">Abertura ERP</th><th class="num">Abertura nossa</th>
+          <th class="num">Entrou ERP</th><th class="num">Entrou nosso</th>
+          <th class="num">Saiu ERP</th><th class="num">Saiu nosso</th>
+          <th class="num">Saldo ERP</th><th class="num">Saldo nosso</th>
+          <th class="num">Diferença</th><th class="num">Valor ERP</th>
+          <th class="num">Valor nosso</th><th>Situação</th>
+        </tr></thead>
+        <tbody><tr><td colspan="14" class="skel">—</td></tr></tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin:10px 0 0;line-height:1.6">
+      <b>Abertura</b> é o saldo no primeiro dia do período: o do ERP vem da linha
+      sem movimento do relatório, o nosso é a nossa posição na véspera. Abertura
+      diferente com movimentação igual significa que a diferença nasceu
+      <b>antes</b> deste período — e é lá que se investiga, não aqui.
+    </p>
+  </section>
+
+  <section id="aba-documentos" hidden>
+    <div class="controls" style="margin:12px 0">
+      <select id="f-doc">
+        <option value="divergente">Só o que não bate</option>
+        <option value="">Todas as linhas</option>
+        <option value="so_erp">Só no ERP</option>
+        <option value="so_nosso">Só na nossa apuração</option>
+        <option value="qtd_difere">Quantidade diferente</option>
+        <option value="sem_documento">Movimento sem documento fiscal</option>
+        <option value="confere">Confere</option>
+      </select>
+    </div>
+    <div class="wrap">
+      <table id="tbl-docs">
+        <thead><tr>
+          <th>Data</th><th>NF</th><th>Item</th><th class="desc">Descrição</th>
+          <th class="desc">Operação no ERP</th><th class="desc">Contraparte</th>
+          <th>CFOP</th>
+          <th class="num">Entrou ERP</th><th class="num">Entrou nosso</th>
+          <th class="num">Saiu ERP</th><th class="num">Saiu nosso</th>
+          <th class="num">Diferença</th><th>Situação</th>
+        </tr></thead>
+        <tbody><tr><td colspan="13" class="skel">—</td></tr></tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin:10px 0 0;line-height:1.6">
+      O casamento é por <b>nota, item e data</b>. <b>Só no ERP</b> é estoque que
+      andou lá e não tem XML aqui — ou a nota não foi importada, ou o movimento
+      não tem documento fiscal nenhum. <b>Só na nossa apuração</b> é o contrário:
+      XML autorizado que o ERP não baixou.
+    </p>
+  </section>
+
+  <section id="aba-alertas" hidden>
+    <div class="wrap" style="margin-top:12px">
+      <table id="tbl-alertas">
+        <thead><tr><th>O que foi encontrado</th><th>Item</th><th class="desc">Descrição</th>
+          <th>Data</th><th>Documento</th><th class="desc">Detalhe</th>
+          <th class="num">Quantidade</th><th class="num">Valor</th></tr></thead>
+        <tbody><tr><td colspan="8" class="skel">—</td></tr></tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin:10px 0 0;line-height:1.6">
+      Isto aqui o extrato denuncia <b>sozinho</b>, sem precisar da nossa apuração:
+      movimento sem documento fiscal, custo médio que salta mais de 50% de um
+      lançamento para o outro e quantidade fora de escala para o próprio item.
+      O custo médio alimenta o CMV — um salto desses muda o resultado do mês.
+    </p>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+<script>ligarSair(); ligarTrabalhos();</script>
+<script>
+const $ = id => document.getElementById(id);
+let dados = null;
+
+const SIT_ITEM = {
+  confere: ['confere', 'ok'],
+  saldo_difere: ['saldo final difere', 'err'],
+  abertura_difere: ['abertura difere', 'warn'],
+  valor_difere: ['valor difere', 'warn'],
+  so_erp: ['só no ERP', 'err'],
+  so_nosso: ['só na nossa apuração', 'err'],
+};
+const SIT_DOC = {
+  confere: ['confere', 'ok'],
+  qtd_difere: ['quantidade difere', 'err'],
+  so_erp: ['só no ERP', 'err'],
+  so_nosso: ['só na nossa apuração', 'err'],
+  sem_documento: ['sem documento fiscal', 'warn'],
+};
+const ALERTA = {
+  sem_documento: ['sem nota', 'warn'],
+  custo_pula: ['custo médio', 'err'],
+  quantidade_fora_de_escala: ['quantidade', 'err'],
+};
+
+function card(lbl, val, foot, cls) {
+  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+          <div class="val sm">${val}</div><div class="foot">${foot || ''}</div></div>`;
+}
+
+/** Número com sinal: a diferença só é útil se der para ver de que lado pende. */
+function dif(v) {
+  const x = +v || 0;
+  if (!x) return '<span class="muted">—</span>';
+  return `<b class="dif">${x > 0 ? '+' : ''}${n(x)}</b>`;
+}
+
+async function carregar(id) {
+  let arqs;
+  try { arqs = await api('/api/erp'); } catch (e) { return falha(e); }
+  if (!arqs.length) {
+    $('arquivo').innerHTML = '<option>nenhum extrato importado</option>';
+    $('kpis').innerHTML = '<div class="skel">Envie o .xlsx do ERP acima para começar.</div>';
+    return;
+  }
+  $('arquivo').innerHTML = arqs.map(a => `<option value="${a.id}"${+a.id === +id ? ' selected' : ''}>
+      ${esc(a.deposito || '?')} · ${esc((a.dt_ini || '').slice(0, 7))} ·
+      ${esc(a.nome_arquivo.slice(0, 40))}${a.vigente ? '' : ' (substituído)'}</option>`).join('');
+
+  const q = id ? '?id=' + encodeURIComponent(id) : '';
+  try { dados = await api('/api/erp/confronto' + q); } catch (e) { return falha(e); }
+  const a = dados.arquivo, r = dados.resumo;
+  if (!a) return;
+  $('arquivo').value = a.id;
+  $('arq-info').textContent =
+    `${a.linhas} linhas · ${a.itens} itens · ${a.movimentos} movimentos · ` +
+    `${brDate(a.dt_ini)} a ${brDate(a.dt_fin)}` + (a.uf ? ` · filial ${a.uf}` : '');
+
+  const naoBate = r ? +r.saldo_difere + +r.so_erp + +r.so_nosso : 0;
+  $('kpis').innerHTML = [
+    card('Itens no confronto', n(r ? r.itens : 0),
+         `${n(r ? r.confere : 0)} conferem`, naoBate ? '' : 'good'),
+    card('Saldo final diferente', n(r ? r.saldo_difere : 0),
+         'mesma data, quantidade diferente', +(r || {}).saldo_difere ? 'alert' : 'good'),
+    card('Item só de um lado', n(r ? +r.so_erp + +r.so_nosso : 0),
+         `${n(r ? r.so_erp : 0)} só no ERP · ${n(r ? r.so_nosso : 0)} só nosso`,
+         r && (+r.so_erp + +r.so_nosso) ? 'alert' : 'good'),
+    card('Abertura diferente', n(r ? r.abertura_difere : 0),
+         'a diferença nasceu antes deste período',
+         +(r || {}).abertura_difere ? 'alert' : ''),
+    card('Estoque no fim — ERP', money(r ? r.erp_valor_final : 0),
+         `nosso ${money(r ? r.nosso_valor_final : 0)} · diferença ${money(r ? r.dif_valor : 0)}`),
+    card('Notas que não casam', n(r ? +r.docs_so_erp + +r.docs_so_nosso + +r.docs_qtd_difere : 0),
+         `${n(r ? r.docs_so_erp : 0)} só no ERP · ${n(r ? r.docs_so_nosso : 0)} só nossas · ` +
+         `${n(r ? r.docs_qtd_difere : 0)} com quantidade diferente`,
+         r && (+r.docs_so_erp + +r.docs_so_nosso + +r.docs_qtd_difere) ? 'alert' : 'good'),
+    card('Movimento sem nota no ERP', n(r ? r.linhas_sem_documento : 0),
+         'estoque andou lá sem documento fiscal',
+         +(r || {}).linhas_sem_documento ? 'alert' : 'good'),
+    card('Alertas do próprio extrato', n(dados.alertas.length),
+         'custo que pula, quantidade fora de escala',
+         dados.alertas.length ? 'alert' : 'good'),
+  ].join('');
+
+  desenharItens(); desenharDocs(); desenharAlertas();
+}
+
+function desenharItens() {
+  const f = $('f-item').value;
+  const vistas = dados.itens.filter(x =>
+    f === 'divergente' ? x.situacao !== 'confere' : (!f || x.situacao === f));
+  fill('tbl-itens', vistas, x => {
+    const [txt, cls] = SIT_ITEM[x.situacao] || [x.situacao, ''];
+    return `
+      <td class="mono"><b>${esc(x.cod_item)}</b></td>
+      <td class="desc">${esc((x.descr_item || '—').slice(0, 46))}</td>
+      <td class="num">${n(x.erp_inicial)}</td>
+      <td class="num ${+x.dif_inicial ? 'dif' : 'igual'}">${n(x.nosso_inicial)}</td>
+      <td class="num">${n(x.erp_entradas)}</td>
+      <td class="num ${+x.erp_entradas !== +x.nossas_entradas ? 'dif' : 'igual'}">${n(x.nossas_entradas)}</td>
+      <td class="num">${n(x.erp_saidas)}</td>
+      <td class="num ${+x.erp_saidas !== +x.nossas_saidas ? 'dif' : 'igual'}">${n(x.nossas_saidas)}</td>
+      <td class="num"><b>${n(x.erp_final)}</b></td>
+      <td class="num ${+x.dif_final ? 'dif' : 'igual'}"><b>${n(x.nosso_final)}</b></td>
+      <td class="num">${dif(x.dif_final)}</td>
+      <td class="num">${money(x.erp_valor)}</td>
+      <td class="num">${money(x.nosso_valor)}</td>
+      <td><span class="chip ${cls}">${txt}</span></td>`;
+  }, vistas.length ? `<tfoot><tr><td colspan="8">${n(vistas.length)} item(ns)</td>
+      <td class="num">${n(vistas.reduce((a, x) => a + +x.erp_final, 0))}</td>
+      <td class="num">${n(vistas.reduce((a, x) => a + +x.nosso_final, 0))}</td>
+      <td class="num">${dif(vistas.reduce((a, x) => a + +x.dif_final, 0))}</td>
+      <td class="num">${money(vistas.reduce((a, x) => a + +x.erp_valor, 0))}</td>
+      <td class="num">${money(vistas.reduce((a, x) => a + +x.nosso_valor, 0))}</td>
+      <td></td></tr></tfoot>` : '');
+}
+
+function desenharDocs() {
+  const f = $('f-doc').value;
+  const vistas = dados.documentos.filter(x =>
+    f === 'divergente' ? x.situacao !== 'confere' : (!f || x.situacao === f));
+  fill('tbl-docs', vistas, x => {
+    const [txt, cls] = SIT_DOC[x.situacao] || [x.situacao, ''];
+    return `
+      <td class="mono">${x.dt_txt ? brDate(x.dt_txt) : '—'}</td>
+      <td class="mono">${esc(x.num_nf || '—')}</td>
+      <td class="mono">${esc(x.cod_item || '—')}</td>
+      <td class="desc">${esc((x.descr_item || '—').slice(0, 34))}</td>
+      <td class="desc">${esc(x.tipo || '—')}</td>
+      <td class="desc">${esc((x.contraparte || '—').slice(0, 28))}</td>
+      <td class="mono">${esc(x.cfop || '—')}</td>
+      <td class="num">${+x.erp_entrada ? n(x.erp_entrada) : '—'}</td>
+      <td class="num">${+x.nossa_entrada ? n(x.nossa_entrada) : '—'}</td>
+      <td class="num">${+x.erp_saida ? n(x.erp_saida) : '—'}</td>
+      <td class="num">${+x.nossa_saida ? n(x.nossa_saida) : '—'}</td>
+      <td class="num">${dif(x.diferenca)}</td>
+      <td><span class="chip ${cls}">${txt}</span></td>`;
+  });
+}
+
+function desenharAlertas() {
+  fill('tbl-alertas', dados.alertas, x => {
+    const [txt, cls] = ALERTA[x.tipo] || [x.tipo, 'warn'];
+    return `
+      <td><span class="chip ${cls}">${txt}</span> ${esc(x.titulo)}</td>
+      <td class="mono">${esc(x.cod_item)}</td>
+      <td class="desc">${esc((x.descr_item || '—').slice(0, 40))}</td>
+      <td class="mono">${x.dt_txt ? brDate(x.dt_txt) : '—'}</td>
+      <td class="mono">${esc(x.doc || '—')}</td>
+      <td class="desc">${esc(x.detalhe || '')}</td>
+      <td class="num">${dif(x.quantidade)}</td>
+      <td class="num">${money(x.valor)}</td>`;
+  });
+}
+
+/* ------------------------------------------------------------------ envio */
+async function emBase64(f) {
+  const b = new Uint8Array(await f.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000)
+    s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+const log = $('log');
+function linha(txt, cls) {
+  log.insertAdjacentHTML('beforeend', `<div class="${cls || ''}">${esc(txt)}</div>`);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function enviar(arquivos) {
+  // A planilha é um zip: vai em bytes, nunca como texto.
+  const xs = [...arquivos].filter(f => /\.(xlsx|xlsm)$/i.test(f.name));
+  if (!xs.length) return linha('Nenhuma planilha .xlsx na seleção.', 'err');
+  log.innerHTML = '';
+  $('prog').hidden = false; $('prog').value = 10;
+  linha(`Lendo ${xs.length} planilha(s)…`, 'mut');
+  const payload = await Promise.all(xs.map(async f =>
+    ({ nome: f.name, base64: await emBase64(f) })));
+  $('prog').value = 40;
+  try {
+    const r = await apiPost('/api/import/upload', { arquivos: payload });
+    $('prog').value = 100;
+    (r.arquivos || []).forEach(a => {
+      linha(`${a.arquivo}: ${a.situacao}`, a.situacao === 'ignorado' ? 'err' : '');
+      (a.avisos || []).forEach(v => linha('    ' + v, 'mut'));
+    });
+    await carregar();
+  } catch (e) {
+    linha('Falhou: ' + e.message, 'err');
+  } finally {
+    $('prog').hidden = true;
+  }
+}
+
+$('drop').onclick = () => $('file').click();
+$('file').onchange = e => enviar(e.target.files);
+['dragenter', 'dragover'].forEach(ev => $('drop').addEventListener(ev, e => {
+  e.preventDefault(); $('drop').classList.add('on');
+}));
+['dragleave', 'drop'].forEach(ev => $('drop').addEventListener(ev, e => {
+  e.preventDefault(); $('drop').classList.remove('on');
+}));
+$('drop').addEventListener('drop', e => enviar(e.dataTransfer.files));
+
+$('arquivo').onchange = () => carregar($('arquivo').value);
+$('f-item').onchange = desenharItens;
+$('f-doc').onchange = desenharDocs;
+$('abas').querySelectorAll('[data-aba]').forEach(b => b.onclick = () => {
+  $('abas').querySelectorAll('[data-aba]').forEach(x => x.classList.toggle('on', x === b));
+  ['itens', 'documentos', 'alertas'].forEach(
+    k => $('aba-' + k).hidden = k !== b.dataset.aba);
+});
+
+carregar();
+</script>
+</body>
+</html>

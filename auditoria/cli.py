@@ -98,8 +98,22 @@ def cmd_importar(args):
         print("  Nada a importar.")
         return 1
     print(f"\nImportando {len(caminhos)} arquivo(s)\n" + "-" * 72)
-    from . import carga_ecd, carga_nfe, ecd
+    from . import carga_ecd, carga_erp, carga_nfe, ecd, erp
     for c in caminhos:
+        if c.lower().endswith((".xlsx", ".xlsm")):
+            # Planilha: hoje só o extrato de produtos do ERP.
+            if not erp.e_extrato_erp(c):
+                print(f"  ignorado               {os.path.basename(c)[:56]}")
+                print("             ! planilha não reconhecida — esperava o extrato "
+                      "de produtos por depósito do ERP")
+                continue
+            rp = carga_erp.importa(c)
+            print(f"  {rp.situacao:<22} ERP #{rp.arquivo_id}  {rp.arquivo[:52]}")
+            print(f"             {rp.linhas} linhas · {rp.itens} itens · "
+                  f"depósito {rp.deposito or '?'} · filial {rp.cnpj or '?'}")
+            for tipo, det in rp.problemas:
+                print(f"             ! {tipo}: {det[:96]}")
+            continue
         if c.lower().endswith(".txt") and ecd.e_ecd(c):
             # ECD e EFD são .txt: quem decide é o conteúdo, não a extensão.
             re_ = carga_ecd.importa(c)

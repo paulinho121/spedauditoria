@@ -183,6 +183,28 @@ def _periodo_params(qs):
             "p_origem": origem if origem in ("nfe", "") else "nfe"}
 
 
+def rota_erp_confronto(qs):
+    """O extrato do ERP contra a nossa apuração. Sem id, o mais recente."""
+    aid = int((qs.get("id") or ["0"])[0] or 0)
+    if not aid:
+        ultimo = consulta_rest("erp_extrato_arquivo", {
+            "vigente": "is.true", "order": "dt_ini.desc,id.desc",
+            "limit": 1, "select": "id"})
+        if not ultimo:
+            return {"arquivo": None, "resumo": None, "itens": [],
+                    "documentos": [], "alertas": []}
+        aid = int(ultimo[0]["id"])
+    arq = consulta_rest("erp_extrato_arquivo", {"id": f"eq.{aid}"})
+    if not arq:
+        return {"erro": "extrato não encontrado"}
+    resumo = consulta_rest("rpc/erp_confronto_resumo", {"p_arquivo_id": aid})
+    return {"arquivo": arq[0],
+            "resumo": resumo[0] if resumo else None,
+            "itens": consulta_rest("rpc/erp_confronto_item", {"p_arquivo_id": aid}),
+            "documentos": consulta_rest("rpc/erp_confronto_documento", {"p_arquivo_id": aid}),
+            "alertas": consulta_rest("rpc/erp_extrato_alertas", {"p_arquivo_id": aid})}
+
+
 def rota_cfop_detalhe(qs, funcao):
     """Itens ou notas de um CFOP do mes. Sem CFOP na consulta nao ha o que ver."""
     cfop = re.sub(r"\D", "", (qs.get("cfop") or [""])[0])[:4]
@@ -391,6 +413,9 @@ ROTAS = {
     "/api/periodo/bloqueios": lambda qs: consulta_rest(
         "rpc/periodo_bloqueios",
         dict(zip(("p_ini", "p_fim"), _mes(qs)))),
+    "/api/erp": lambda qs: consulta_rest("erp_extrato_arquivo", {
+        "order": "dt_ini.desc,importado_em.desc"}),
+    "/api/erp/confronto": rota_erp_confronto,
     "/api/periodo/cfops": lambda qs: consulta_rest(
         "rpc/conferencia_cfop", _faturamento_params(qs)),
     "/api/periodo/cfop/itens": lambda qs: rota_cfop_detalhe(
@@ -545,7 +570,16 @@ def importar_upload(corpo):
                 cod = "latin-1" if nome.lower().endswith(".txt") else "utf-8"
                 with open(caminho, "w", encoding=cod, errors="replace", newline="") as fh:
                     fh.write(arq.get("conteudo") or "")
-            if nome.lower().endswith(".txt") and pecd.e_ecd(caminho):
+            if nome.lower().endswith((".xlsx", ".xlsm")):
+                # Planilha: só o extrato de produtos do ERP, reconhecido pelo
+                # cabeçalho. Chega sempre em base64 — é um zip.
+                from auditoria import carga_erp, erp as perp
+                if not perp.e_extrato_erp(caminho):
+                    raise ValueError("planilha não reconhecida — esperava o "
+                                     "extrato de produtos por depósito do ERP")
+                payload, _e, probs = carga_erp.payload(caminho)
+                r = chama_rpc("importar_erp_extrato", payload)
+            elif nome.lower().endswith(".txt") and pecd.e_ecd(caminho):
                 from auditoria import carga_ecd
                 payload, probs = carga_ecd.payload(caminho)
                 r = chama_rpc("importar_ecd", payload)
@@ -659,6 +693,8 @@ def app(environ, start_response):
         caminho = "/resultado.html"
     elif caminho == "/importar":
         caminho = "/importar.html"
+    elif caminho == "/erp":
+        caminho = "/erp.html"
     elif caminho == "/relatorio":
         caminho = "/relatorio.html"
     elif caminho == "/manual":

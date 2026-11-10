@@ -253,6 +253,43 @@ def sql_periodo_bloqueios(mes):
     return f"select * from periodo_bloqueios({ini}, {fim})"
 
 
+def erp_arquivos(qs):
+    """Extratos do ERP já importados, do mais recente para o mais antigo."""
+    return query(
+        "select id, nome_arquivo, deposito, cnpj, uf, dt_ini::text dt_ini, "
+        "       dt_fin::text dt_fin, linhas, itens, movimentos, aberturas, vigente, "
+        "       problemas, importado_por, to_char(importado_em,'DD/MM/YYYY HH24:MI') importado "
+        "from erp_extrato_arquivo order by dt_ini desc, importado_em desc")
+
+
+def erp_confronto(qs):
+    """
+    O extrato do ERP contra a nossa apuração pelos XML: resumo, item a item,
+    nota a nota, e o que o próprio extrato denuncia sozinho.
+    """
+    aid = int((qs.get("id") or ["0"])[0] or 0)
+    if not aid:
+        ultimo = query("select id from erp_extrato_arquivo "
+                       "where vigente order by dt_ini desc, id desc limit 1")
+        if not ultimo:
+            return {"arquivo": None, "resumo": None, "itens": [],
+                    "documentos": [], "alertas": []}
+        aid = int(ultimo[0]["id"])
+    arq = query("select id, nome_arquivo, deposito, cnpj, uf, dt_ini::text dt_ini, "
+                "dt_fin::text dt_fin, linhas, itens, movimentos, aberturas, vigente, "
+                "problemas from erp_extrato_arquivo where id = %d" % aid)
+    if not arq:
+        return {"erro": "extrato não encontrado"}
+    resumo = query(f"select * from erp_confronto_resumo({aid})")
+    return {
+        "arquivo": arq[0],
+        "resumo": resumo[0] if resumo else None,
+        "itens": query(f"select * from erp_confronto_item({aid})"),
+        "documentos": query(f"select *, dt::text dt_txt from erp_confronto_documento({aid})"),
+        "alertas": query(f"select *, dt::text dt_txt from erp_extrato_alertas({aid})"),
+    }
+
+
 def sql_conferencia_cfop(mes, uf):
     ini, fim = _mes(mes, "2023-01")
     return f"select * from conferencia_cfop({ini}, {fim}, {_cnpj_da_uf(uf)})"
@@ -344,11 +381,11 @@ def importar_upload(body):
     destino = os.path.join(os.path.dirname(HERE), "xmls", "recebidos")
     os.makedirs(destino, exist_ok=True)
     import base64
-    from auditoria import carga, carga_ecd, ecd
+    from auditoria import carga, carga_ecd, carga_erp, ecd, erp
     gravados = []
     for arq in (body or {}).get("arquivos", []):
         nome = os.path.basename(arq.get("nome") or "")
-        if not nome.lower().endswith((".xml", ".txt")):
+        if not nome.lower().endswith((".xml", ".txt", ".xlsx", ".xlsm")):
             continue
         caminho = os.path.join(destino, nome)
         if "base64" in arq:
@@ -361,11 +398,28 @@ def importar_upload(body):
                 fh.write(arq.get("conteudo") or "")
         gravados.append(caminho)
     if not gravados:
-        return {"erro": "nenhum arquivo .xml ou .txt recebido"}
+        return {"erro": "nenhum arquivo .xml, .txt ou .xlsx recebido"}
     res = []
     for c in gravados:
         if c.lower().endswith(".xml"):
             res.append(carga_nfe.importa(c))
+            continue
+        if c.lower().endswith((".xlsx", ".xlsm")):
+            # Planilha: hoje só o extrato de produtos do ERP, reconhecido pelo
+            # cabeçalho. Outra planilha é recusada com o motivo, e não em
+            # silêncio — quem enviou precisa saber que não foi lida.
+            try:
+                if not erp.e_extrato_erp(c):
+                    raise ValueError("planilha não reconhecida — esperava o "
+                                     "extrato de produtos por depósito do ERP")
+                r = carga_erp.importa(c)
+                av = [f"ERP: {r.linhas} linhas, {r.itens} itens, "
+                      f"depósito {r.deposito or '?'}"] + \
+                     [f"{t}: {d}" for t, d in r.problemas]
+                res.append(carga_nfe.ResultadoNFe(os.path.basename(c), r.situacao, avisos=av))
+            except Exception as e:
+                res.append(carga_nfe.ResultadoNFe(os.path.basename(c), "ignorado",
+                                                  avisos=[f"{type(e).__name__}: {e}"]))
             continue
         # .txt: ECD ou EFD, pelo conteúdo.
         try:
@@ -582,6 +636,8 @@ ROUTES = {
         (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0], "faturamento_notas")),
     "/api/periodo/bloqueios": lambda qs: query(
         sql_periodo_bloqueios((qs.get("mes") or [""])[0])),
+    "/api/erp": erp_arquivos,
+    "/api/erp/confronto": erp_confronto,
     "/api/periodo/cfops": lambda qs: query(sql_conferencia_cfop(
         (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0])),
     "/api/periodo/cfop/itens": lambda qs: query(sql_conferencia_cfop_detalhe(
@@ -792,6 +848,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/resultado.html"
         if path == "/importar":
             path = "/importar.html"
+        if path == "/erp":
+            path = "/erp.html"
         if path == "/relatorio":
             path = "/relatorio.html"
         if path == "/manual":

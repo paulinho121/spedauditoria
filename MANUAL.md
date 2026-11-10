@@ -107,14 +107,21 @@ determina o que vai ser possível apurar.
 
 ### Importar
 
-Na tela **Importar**, arraste os arquivos EFD (`.txt`) ou NF-e (`.xml`) para a
-área tracejada. Vale online e local.
+Na tela **Importar**, arraste os arquivos para a área tracejada — vale online e
+local. O sistema aceita:
+
+| Arquivo | O que é |
+|---|---|
+| `.xml` | NF-e, NFS-e e evento de cancelamento |
+| `.txt` | EFD ICMS/IPI ou ECD — o sistema decide pelo conteúdo, não pela extensão |
+| `.xlsx` | Extrato de produtos por depósito do ERP (veja *Extrato do ERP*) |
 
 Pelo terminal, em qualquer volume:
 
 ```bash
 python -m auditoria importar "C:\caminho\*.txt"
 python -m auditoria importar "C:\caminho\*.xml"
+python -m auditoria importar "C:\caminho\*.xlsx"
 ```
 
 **A importação é idempotente.** O sistema calcula o SHA-256 de cada arquivo;
@@ -507,6 +514,64 @@ nenhuma.
 **Notas e EFDs importadas antes da apuração existir** não têm os impostos
 gravados. Importe os mesmos arquivos de novo: nada é duplicado, e os impostos
 que faltavam são completados.
+
+### Extrato do ERP — a versão do cliente da mesma história
+
+Tela **ERP**. O relatório *Extrato de produtos por depósito, produto e lote* é
+o Kardex do sistema do cliente: uma linha por movimento, com data, depósito,
+documento de origem, quantidade e custo. Ele vale para a auditoria por ser a
+**outra** versão do mesmo estoque — a nossa vem do XML, a dele vem do sistema
+que emitiu a nota.
+
+**O extrato não vira movimento.** Fica guardado ao lado da nossa apuração,
+nunca dentro dela. Se o número do ERP entrasse no Kardex, a conferência estaria
+comparando o ERP com ele mesmo.
+
+**Como enviar.** Exporte em `.xlsx` e arraste na própria tela ERP (ou na tela
+Importar, que aceita os três formatos). Pelo terminal:
+
+```bash
+python -m auditoria importar "C:\caminho\Extrato de produtos*.xlsx"
+```
+
+Reenviar o mesmo arquivo não duplica nada. Um extrato novo do mesmo depósito e
+período substitui o anterior, que fica guardado — o cliente reemite o relatório
+depois de corrigir um lançamento, e a auditoria precisa poder mostrar as duas
+versões.
+
+Duas convenções do relatório que o sistema conhece:
+
+- A linha **sem chave de movimento** é o saldo de abertura do item no período.
+- A saída vem com quantidade e custo **negativos**; aqui cada lado ganha coluna
+  própria, para que somar não dependa de lembrar do sinal.
+
+O **depósito vira filial** pela UF no fim do nome (`DEP MCI SP` → SP). O
+**período** sai dos próprios movimentos, do primeiro ao último dia do mês — por
+isso a abertura do ERP é confrontada com a nossa posição na véspera.
+
+**Três confrontos**, do mais grosso ao mais fino:
+
+| Aba | O que mostra |
+|---|---|
+| **Item a item** | Abertura, entradas, saídas, saldo final e custo, pelos dois lados |
+| **Nota a nota** | Casamento por nota, item e data: o que só o ERP movimentou, o que só nós movimentamos, e onde a quantidade difere |
+| **O que o extrato denuncia** | O que o relatório mostra sozinho, sem precisar de nós |
+
+**Abertura diferente com movimentação igual** significa que a diferença nasceu
+**antes** do período do extrato — e é lá que se investiga, não no mês que está
+na tela.
+
+A terceira aba não depende da nossa apuração: aponta **movimento sem documento
+fiscal** (estoque que andou no ERP sem nota), **custo médio que salta mais de
+50%** de um lançamento para o outro e **quantidade fora de escala** — cem vezes
+o saldo que o item tinha na linha anterior, ou quantidade quebrada em item
+contado por unidade. O custo médio alimenta o CMV: um salto desses muda o
+resultado do mês.
+
+O sistema também confere o extrato **contra ele mesmo**: o saldo impresso em
+cada linha tem de ser o anterior mais a entrada menos a saída. Quando não
+fecha, o aviso aparece na importação — esse número não pode ser usado para
+auditar nada sem a ressalva.
 
 ### Resultado contábil — lucro ou prejuízo
 
