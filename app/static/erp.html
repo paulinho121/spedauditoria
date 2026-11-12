@@ -232,8 +232,10 @@ td.igual { color: var(--on-surface-variant); }
         descrição e o seu saldo — nada é somado.
         O arquivo de saldo não traz preço: o <b>custo</b> é o que a base conhece para
         o mesmo código, nesta ordem — custo médio da própria filial na data, última
-        entrada na filial, última entrada do código em outra filial, custo médio que
-        o ERP informou num extrato de movimentos. <b>Preço de venda não entra</b>:
+        entrada na filial, <b>nota de remessa para armazém</b> emitida pela filial
+        (CFOP 5905/6905, que sai pelo valor da mercadoria), última entrada do código
+        em outra filial, custo médio que o ERP informou num extrato de movimentos.
+        <b>Preço de venda não entra</b>:
         estoque se mede a custo. Item sem nenhuma dessas fontes fica sem valor, e o
         total valorado é <b>parcial</b> enquanto houver item nessa condição.
       </p>
@@ -640,8 +642,9 @@ function resumirPosicao() {
       <b>${n(t.sem)}</b> (${qt(t.qtdSem)} un) estão na foto do ERP mas
       <b>nunca tiveram entrada importada aqui</b> — não há custo para aplicar, e
       elas ficam sem valor em vez de receber um número arbitrado. Para fechar o
-      total: importar as notas de entrada desses produtos, ou tirar do ERP o
-      extrato de movimentos (ele traz o custo médio) da filial.
+      total: importar as notas de entrada ou de remessa para armazém desses
+      produtos, ou tirar do ERP o extrato de movimentos (ele traz o custo médio)
+      da filial.
     </p>`;
 }
 

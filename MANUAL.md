@@ -634,8 +634,15 @@ qual foi usado:
 
 1. custo médio da própria filial na data da foto (a nossa apuração);
 2. última entrada na própria filial — inventário de abertura ou nota;
-3. última entrada do mesmo código em outra filial da empresa;
-4. custo médio que o próprio ERP informou num extrato de movimentos.
+3. **remessa para armazém geral ou depósito fechado** (CFOP 5905/6905) emitida
+   pela própria filial — a mercadoria continua sendo dela e a nota sai pelo
+   valor da mercadoria, sem margem. A origem mostra o número da nota;
+4. última entrada do mesmo código em outra filial da empresa;
+5. custo médio que o próprio ERP informou num extrato de movimentos.
+
+Para dar valor a um produto que está sem custo, basta **importar o XML** da nota
+de entrada ou da remessa para armazém dele, na tela *Importar*: a aba recalcula
+sozinha.
 
 **Preço de venda não entra.** Estoque se mede a custo, e o preço da última
 saída levaria a margem para dentro do total.
@@ -644,8 +651,9 @@ Produto sem nenhuma dessas fontes fica **sem valor** — não recebe custo
 arbitrado. Enquanto houver produto assim, o *Valor apurado* é **parcial**: a
 tela diz quantos produtos e quantas unidades ficaram de fora, e o mesmo aviso
 vai escrito no cabeçalho do arquivo exportado, porque o relatório circula sem
-a tela. Para fechar o total, importe as notas de entrada desses produtos ou o
-extrato de movimentos do ERP daquela filial (ele traz o custo médio).
+a tela. Para fechar o total, importe as notas de entrada ou de remessa para
+armazém desses produtos, ou o extrato de movimentos do ERP daquela filial (ele
+traz o custo médio).
 
 #### Confronto com a nossa apuração
 
