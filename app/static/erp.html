@@ -226,7 +226,10 @@ td.igual { color: var(--on-surface-variant); }
         </table>
       </div>
       <p class="muted" style="font-size:12.5px;margin:10px 0 24px;line-height:1.6">
-        Aqui está <b>só o que o ERP declara ter</b>, sem a nossa posição misturada.
+        Aqui está <b>só o que o ERP declara ter</b>, sem a nossa posição misturada,
+        <b>linha a linha como veio no arquivo</b>: quando o ERP traz o mesmo código
+        em mais de uma linha (dois cadastros do produto), cada uma aparece com a sua
+        descrição e o seu saldo — nada é somado.
         O arquivo de saldo não traz preço: o <b>custo</b> é o que a base conhece para
         o mesmo código, nesta ordem — custo médio da própria filial na data, última
         entrada na filial, última entrada do código em outra filial, custo médio que
@@ -611,12 +614,17 @@ function totaisPosicao(xs) {
 function resumirPosicao() {
   const xs = saldo.posicao || [], t = totaisPosicao(xs);
   const pct = (a, b) => b ? (100 * a / b).toFixed(1).replace('.', ',') + '%' : '—';
+  // Código que o ERP exporta em mais de uma linha: são cadastros diferentes,
+  // cada um com o seu saldo. Aqui eles NÃO são somados.
+  const rep = new Set(xs.filter(x => +x.linhas_no_arquivo > 1).map(x => x.cod_item)).size;
   $('posicao-kpis').innerHTML = [
-    card('Estoque declarado', qt(t.qtd) + ' un', `${n(t.itens)} produtos na foto do ERP`),
+    card('Estoque declarado', qt(t.qtd) + ' un',
+         `${n(t.itens)} linhas, como vieram no arquivo do ERP` +
+         (rep ? ` · ${n(rep)} código(s) em mais de uma linha` : '')),
     card('Valor apurado', money(t.valor),
-         t.sem ? `só dos ${n(t.com)} produtos com custo conhecido — parcial`
-               : 'todos os produtos valorados', t.sem ? 'alert' : 'good'),
-    card('Com valor', n(t.com), `${qt(t.qtdCom)} un · ${pct(t.com, t.itens)} dos produtos`),
+         t.sem ? `só das ${n(t.com)} linhas com custo conhecido — parcial`
+               : 'todas as linhas valoradas', t.sem ? 'alert' : 'good'),
+    card('Com valor', n(t.com), `${qt(t.qtdCom)} un · ${pct(t.com, t.itens)} das linhas`),
     card('Sem valor', n(t.sem),
          `${qt(t.qtdSem)} un · ${pct(t.qtdSem, t.qtd)} das unidades`, t.sem ? 'alert' : 'good'),
   ].join('');
@@ -627,11 +635,11 @@ function resumirPosicao() {
   if (t.sem) av.innerHTML = `
     <div class="lbl">Este valor não é o valor do estoque inteiro</div>
     <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
-      <b>${money(t.valor)}</b> é quanto valem os <b>${n(t.com)}</b> produtos
-      (${qt(t.qtdCom)} un) para os quais a base tem custo. Os outros
-      <b>${n(t.sem)}</b> produtos (${qt(t.qtdSem)} un) estão na foto do ERP mas
+      <b>${money(t.valor)}</b> é quanto valem as <b>${n(t.com)}</b> linhas
+      (${qt(t.qtdCom)} un) para as quais a base tem custo. As outras
+      <b>${n(t.sem)}</b> (${qt(t.qtdSem)} un) estão na foto do ERP mas
       <b>nunca tiveram entrada importada aqui</b> — não há custo para aplicar, e
-      eles ficam sem valor em vez de receber um número arbitrado. Para fechar o
+      elas ficam sem valor em vez de receber um número arbitrado. Para fechar o
       total: importar as notas de entrada desses produtos, ou tirar do ERP o
       extrato de movimentos (ele traz o custo médio) da filial.
     </p>`;
@@ -646,8 +654,12 @@ function desenharPosicao() {
   const t = totaisPosicao(vistas);
   fill('tbl-posicao', vistas, x => {
     const dt = x.custo_dt_txt || x.custo_dt;
+    const rep = +x.linhas_no_arquivo > 1
+      ? ` <span class="chip warn" title="O ERP traz este código em ${n(x.linhas_no_arquivo)} linhas, ` +
+        `com descrições e saldos próprios. Cada linha aparece como veio; nada foi somado.">` +
+        `${n(x.linhas_no_arquivo)} linhas</span>` : '';
     return `
-      <td class="mono"><b>${esc(x.cod_item)}</b></td>
+      <td class="mono"><b>${esc(x.cod_item)}</b>${rep}</td>
       <td class="desc" title="${esc(x.descr_item || '')}">${esc((x.descr_item || '—').slice(0, 56))}</td>
       <td class="mono">${x.ncm ? esc(x.ncm) : '<span class="muted">—</span>'}</td>
       <td>${esc(x.unid || '—')}</td>
@@ -657,7 +669,7 @@ function desenharPosicao() {
           : '<span class="muted" title="Sem custo conhecido para este código">sem valor</span>'}</td>
       <td>${x.custo_fonte ? esc(x.custo_fonte) : '<span class="muted">—</span>'}</td>
       <td class="mono">${dt ? brDate(dt) : '<span class="muted">—</span>'}</td>`;
-  }, vistas.length ? `<tfoot><tr><td colspan="4">${n(t.itens)} produto(s)` +
+  }, vistas.length ? `<tfoot><tr><td colspan="4">${n(t.itens)} linha(s)` +
       (t.sem ? ` · ${n(t.sem)} sem valor` : '') + `</td>
       <td class="num">${qt(t.qtd)}</td><td></td>
       <td class="num">${money(t.valor)}</td>
@@ -683,8 +695,8 @@ $('exportar-posicao').onclick = () => {
     titulo: `Estoque declarado pelo ERP — ${a.uf || a.deposito || ''} em ${brDate(a.dt)}`,
     // O aviso de total parcial viaja dentro do arquivo: o relatório circula
     // sem a tela, e o número não pode chegar sozinho.
-    subtitulo: `${a.deposito || ''} · ${n(t.itens)} produtos, ${qt(t.qtd)} un` +
-      (t.sem ? ` · valor parcial: ${n(t.sem)} produtos (${qt(t.qtdSem)} un) sem custo conhecido`
+    subtitulo: `${a.deposito || ''} · ${n(t.itens)} linhas, ${qt(t.qtd)} un` +
+      (t.sem ? ` · valor parcial: ${n(t.sem)} linhas (${qt(t.qtdSem)} un) sem custo conhecido`
              : ' · todos valorados'),
     aba: 'Estoque declarado',
     colunas: COLUNAS_POSICAO,
@@ -715,7 +727,9 @@ function desenharSaldo() {
       <td class="desc">${esc((x.descr_item || '—').slice(0, 44))}</td>
       <td class="mono">${x.ncm ? esc(x.ncm) : '<span class="muted">—</span>'}</td>
       <td>${esc(x.unid || '—')}</td>
-      <td class="num"><b>${n(x.erp_qtd)}</b></td>
+      <td class="num"${+x.linhas_no_arquivo > 1
+          ? ` title="Soma das ${n(x.linhas_no_arquivo)} linhas que o ERP traz para este código — a nossa apuração é por código"` : ''}><b>${n(x.erp_qtd)}</b>${
+          +x.linhas_no_arquivo > 1 ? ' <span class="muted">Σ</span>' : ''}</td>
       <td class="num"><b>${n(x.nossa_qtd)}</b></td>
       <td class="num">${dif(x.diferenca)}</td>
       <td class="num">${x.nosso_custo_medio ? money(x.nosso_custo_medio)

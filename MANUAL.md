@@ -621,6 +621,13 @@ ter — e **Confronto com a nossa apuração**.
 É a foto isolada, pronta para relatório: código, descrição, NCM, quantidade,
 custo unitário e valor, com o total no rodapé. Aqui não entra a nossa posição.
 
+A tabela sai **linha a linha, como veio no arquivo**. Quando o ERP traz o mesmo
+código em mais de uma linha — dois cadastros do produto, cada um com a sua
+descrição e o seu saldo —, as duas aparecem separadas, marcadas com *2 linhas*,
+e **nada é somado**: quem consulta um desses produtos no ERP vê o saldo daquela
+linha, e o relatório tem de mostrar o mesmo número. A soma por código só existe
+na aba de confronto, porque a nossa apuração é por código.
+
 O arquivo de saldo **não traz preço**. O custo de cada produto é o que a base
 conhece para o mesmo código, nesta ordem, e a coluna *De onde vem o custo* diz
 qual foi usado:
