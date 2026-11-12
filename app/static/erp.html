@@ -62,10 +62,11 @@ td.igual { color: var(--on-surface-variant); }
   <div class="card" style="margin-bottom:16px">
     <div class="lbl">Enviar o extrato do ERP</div>
     <div class="drop" id="drop" style="margin-top:12px">
-      <h3>Arraste a planilha aqui</h3>
-      <p>ou clique para escolher — .xlsx exportado do ERP
-         ("Extrato de produtos por depósito, produto e lote")</p>
-      <input type="file" id="file" multiple accept=".xlsx,.xlsm" hidden>
+      <h3>Arraste o arquivo do ERP aqui</h3>
+      <p>ou clique para escolher — o <b>extrato de produtos</b> em .xlsx
+         (movimento a movimento) ou o <b>saldo de produtos</b> em .json
+         (a foto do estoque numa data)</p>
+      <input type="file" id="file" multiple accept=".xlsx,.xlsm,.json" hidden>
     </div>
     <progress id="prog" value="0" max="100" hidden style="width:100%;margin-top:10px"></progress>
     <div id="log"></div>
@@ -77,6 +78,12 @@ td.igual { color: var(--on-surface-variant); }
     </div>
   </div>
 
+  <div class="abas" id="natureza" style="margin:0 0 16px">
+    <button data-nat="extrato" class="on">Extrato de movimentos</button>
+    <button data-nat="saldo">Saldo declarado (foto)</button>
+  </div>
+
+  <div id="bloco-extrato">
   <div class="controls">
     <select id="arquivo"><option>carregando…</option></select>
     <span class="muted" id="arq-info"></span>
@@ -179,6 +186,65 @@ td.igual { color: var(--on-surface-variant); }
       O custo médio alimenta o CMV — um salto desses muda o resultado do mês.
     </p>
   </section>
+  </div><!-- /bloco-extrato -->
+
+  <div id="bloco-saldo" hidden>
+    <div class="controls">
+      <select id="saldo-arquivo"><option>carregando…</option></select>
+      <span class="muted" id="saldo-info"></span>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
+      <div class="lbl">O que esta comparação é — e o que ela não é</div>
+      <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
+        O saldo de produtos é uma <b>foto</b>: quantidade por produto, numa data,
+        sem movimento, sem documento e sem custo. Ela é confrontada com a nossa
+        posição <b>na mesma data</b>, e não vira abertura nem Kardex — isso
+        mudaria a base de tudo o que já foi apurado nesta filial, e é decisão
+        sua, não efeito de uma importação.
+        <b>Diferença grande aqui costuma ser documento que falta importar</b>,
+        não estoque sumido: a nossa posição só conhece os meses que entraram.
+      </p>
+    </div>
+
+    <section class="grid kpis" id="saldo-kpis"><div class="skel">nenhuma foto importada ainda</div></section>
+
+    <div class="controls" style="margin:16px 0 12px">
+      <select id="f-saldo">
+        <option value="divergente">Só o que não bate</option>
+        <option value="">Todos os itens</option>
+        <option value="erp_maior">ERP maior que o nosso</option>
+        <option value="erp_menor">ERP menor que o nosso</option>
+        <option value="so_erp">Só no ERP</option>
+        <option value="so_nosso">Só na nossa apuração</option>
+        <option value="confere">Confere</option>
+      </select>
+      <input type="search" id="q-saldo" placeholder="Código, descrição ou NCM…"
+             autocomplete="off" style="min-width:260px">
+      <button id="exportar-saldo" style="margin-left:auto">Exportar ↓</button>
+    </div>
+
+    <div class="wrap">
+      <table id="tbl-saldo">
+        <thead><tr>
+          <th>Código</th><th class="desc">Descrição</th><th>NCM</th><th>Un.</th>
+          <th class="num">Saldo ERP</th><th class="num">Saldo nosso</th>
+          <th class="num">Diferença</th><th class="num">Custo médio</th>
+          <th class="num">Valor nosso</th><th class="num">Exposição</th>
+          <th>Última mov.</th><th>Situação</th>
+        </tr></thead>
+        <tbody><tr><td colspan="12" class="skel">—</td></tr></tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin:10px 0 24px;line-height:1.6">
+      <b>Exposição</b> é a diferença valorada pelo <b>nosso</b> custo médio —
+      a foto do ERP não traz custo. Item sem custo nosso fica com a exposição em
+      branco: o furo existe em quantidade e não dá para medir em dinheiro, e
+      arbitrar um custo aqui seria inventar número de auditoria.
+      <b>Última mov.</b> é a data do último movimento nosso daquele item: quando
+      ela é antiga, a diferença é quase sempre o período que falta importar.
+    </p>
+  </div><!-- /bloco-saldo -->
 </main>
 
 <script src="/app.js"></script>
@@ -394,11 +460,11 @@ function linha(txt, cls) {
 
 async function enviar(arquivos) {
   // A planilha é um zip: vai em bytes, nunca como texto.
-  const xs = [...arquivos].filter(f => /\.(xlsx|xlsm)$/i.test(f.name));
-  if (!xs.length) return linha('Nenhuma planilha .xlsx na seleção.', 'err');
+  const xs = [...arquivos].filter(f => /\.(xlsx|xlsm|json)$/i.test(f.name));
+  if (!xs.length) return linha('Nenhum .xlsx ou .json na seleção.', 'err');
   log.innerHTML = '';
   $('prog').hidden = false; $('prog').value = 10;
-  linha(`Lendo ${xs.length} planilha(s)…`, 'mut');
+  linha(`Lendo ${xs.length} arquivo(s)…`, 'mut');
   const payload = await Promise.all(xs.map(async f =>
     ({ nome: f.name, base64: await emBase64(f) })));
   $('prog').value = 40;
@@ -410,12 +476,150 @@ async function enviar(arquivos) {
       (a.avisos || []).forEach(v => linha('    ' + v, 'mut'));
     });
     await carregar();
+    if (saldo || xs.some(f => /\.json$/i.test(f.name))) await carregarSaldo();
   } catch (e) {
     linha('Falhou: ' + e.message, 'err');
   } finally {
     $('prog').hidden = true;
   }
 }
+
+/* -------------------------------------------- saldo declarado (foto) */
+let saldo = null, vistasSaldo = [];
+
+const SIT_SALDO = {
+  confere: ['confere', 'ok'],
+  erp_maior: ['ERP maior', 'warn'],
+  erp_menor: ['ERP menor', 'warn'],
+  so_erp: ['só no ERP', 'err'],
+  so_nosso: ['só na nossa apuração', 'err'],
+};
+
+async function carregarSaldo(id) {
+  let arqs;
+  try { arqs = await api('/api/erp/saldos'); } catch (e) { return falha(e); }
+  if (!arqs.length) {
+    $('saldo-arquivo').innerHTML = '<option>nenhuma foto importada</option>';
+    $('saldo-kpis').innerHTML =
+      '<div class="skel">Envie o .json de saldo de produtos acima para começar.</div>';
+    return;
+  }
+  $('saldo-arquivo').innerHTML = arqs.map(a => `<option value="${a.id}"${+a.id === +id ? ' selected' : ''}>
+      ${esc(a.deposito || '?')} · ${brDate(a.dt)} ·
+      ${esc(a.nome_arquivo.slice(0, 40))}${a.vigente ? '' : ' (substituída)'}</option>`).join('');
+
+  try {
+    saldo = await api('/api/erp/saldo' + (id ? '?id=' + encodeURIComponent(id) : ''));
+  } catch (e) { return falha(e); }
+  const a = saldo.arquivo, r = saldo.resumo;
+  if (!a) return;
+  $('saldo-arquivo').value = a.id;
+  $('saldo-info').textContent =
+    `${a.linhas} linhas · ${a.itens} itens · ${n(a.quantidade)} un · posição de ` +
+    `${brDate(a.dt)}` + (a.uf ? ` · filial ${a.uf}` : '');
+
+  // A exposição só cobre os itens com custo nosso. Dizer o total sem dizer o
+  // que ficou de fora seria um número com cara de completo.
+  const semCusto = r ? +r.sem_custo : 0;
+  $('saldo-kpis').innerHTML = [
+    card('Saldo do ERP', n(r ? r.erp_qtd : 0) + ' un',
+         `${n(r ? r.itens : 0)} itens no confronto · ${n(r ? r.confere : 0)} conferem`),
+    card('Nossa posição na data', n(r ? r.nossa_qtd : 0) + ' un',
+         `${money(r ? r.nosso_valor : 0)} · último movimento ` +
+         `${r && r.ultima_mov ? brDate(r.ultima_mov) : '—'}`),
+    card('Diferença', n(r ? r.dif_qtd : 0) + ' un',
+         'o ERP tem isto a mais que a nossa apuração',
+         +(r || {}).dif_qtd ? 'alert' : 'good'),
+    card('Só no ERP', n(r ? r.so_erp : 0),
+         'produto com saldo lá que a nossa apuração nunca viu',
+         +(r || {}).so_erp ? 'alert' : 'good'),
+    card('Só na nossa apuração', n(r ? r.so_nosso : 0),
+         'temos saldo e o ERP zerou — saída que não chegou aqui',
+         +(r || {}).so_nosso ? 'alert' : 'good'),
+    card('Exposição medida', money(r ? r.exposicao : 0),
+         semCusto ? `${n(semCusto)} itens sem custo nosso ficaram de fora`
+                  : 'toda diferença pôde ser valorada',
+         semCusto ? 'alert' : ''),
+  ].join('');
+
+  desenharSaldo();
+}
+
+function desenharSaldo() {
+  const f = $('f-saldo').value, q = $('q-saldo').value.trim().toUpperCase();
+  const vistas = (saldo.itens || []).filter(x =>
+    (f === 'divergente' ? x.situacao !== 'confere' : (!f || x.situacao === f)) &&
+    (!q || `${x.cod_item} ${x.descr_item || ''} ${x.ncm || ''}`.toUpperCase().includes(q)));
+  vistasSaldo = vistas;
+  fill('tbl-saldo', vistas, x => {
+    const [txt, cls] = SIT_SALDO[x.situacao] || [x.situacao, ''];
+    return `
+      <td class="mono"><b>${esc(x.cod_item)}</b></td>
+      <td class="desc">${esc((x.descr_item || '—').slice(0, 44))}</td>
+      <td class="mono">${x.ncm ? esc(x.ncm) : '<span class="muted">—</span>'}</td>
+      <td>${esc(x.unid || '—')}</td>
+      <td class="num"><b>${n(x.erp_qtd)}</b></td>
+      <td class="num"><b>${n(x.nossa_qtd)}</b></td>
+      <td class="num">${dif(x.diferenca)}</td>
+      <td class="num">${x.nosso_custo_medio ? money(x.nosso_custo_medio)
+          : '<span class="muted">—</span>'}</td>
+      <td class="num">${+x.nosso_valor ? money(x.nosso_valor) : '—'}</td>
+      <td class="num">${x.exposicao === null || x.exposicao === undefined
+          ? '<span class="muted" title="Sem custo nosso: não dá para valorar">sem custo</span>'
+          : money(x.exposicao)}</td>
+      <td class="mono">${x.ultima_mov_txt ? brDate(x.ultima_mov_txt)
+          : '<span class="muted">nunca</span>'}</td>
+      <td><span class="chip ${cls}">${txt}</span></td>`;
+  }, vistas.length ? `<tfoot><tr><td colspan="4">${n(vistas.length)} item(ns)</td>
+      <td class="num">${n(vistas.reduce((a, x) => a + +x.erp_qtd, 0))}</td>
+      <td class="num">${n(vistas.reduce((a, x) => a + +x.nossa_qtd, 0))}</td>
+      <td class="num">${dif(vistas.reduce((a, x) => a + +x.diferenca, 0))}</td>
+      <td></td>
+      <td class="num">${money(vistas.reduce((a, x) => a + +x.nosso_valor, 0))}</td>
+      <td class="num">${money(vistas.reduce((a, x) => a + (+x.exposicao || 0), 0))}</td>
+      <td colspan="2"></td></tr></tfoot>` : '');
+}
+
+const COLUNAS_SALDO = [
+  { campo: 'cod_item', rotulo: 'Código' },
+  { campo: 'descr_item', rotulo: 'Descrição' },
+  { campo: 'ncm', rotulo: 'NCM' },
+  { campo: 'unid', rotulo: 'Unidade', marcada: false },
+  { campo: 'erp_qtd', rotulo: 'Saldo ERP', tipo: 'numero' },
+  { campo: 'nossa_qtd', rotulo: 'Saldo nosso', tipo: 'numero' },
+  { campo: 'diferenca', rotulo: 'Diferença', tipo: 'numero' },
+  { campo: 'nosso_custo_medio', rotulo: 'Custo médio', tipo: 'dinheiro' },
+  { campo: 'nosso_valor', rotulo: 'Valor nosso', tipo: 'dinheiro' },
+  { campo: 'exposicao', rotulo: 'Exposição', tipo: 'dinheiro' },
+  { campo: 'ultima_mov_txt', rotulo: 'Última mov.', tipo: 'data', marcada: false },
+  { campo: 'situacao_txt', rotulo: 'Situação' },
+];
+
+$('exportar-saldo').onclick = () => {
+  if (!saldo || !saldo.arquivo) return;
+  const a = saldo.arquivo;
+  painelExportar({
+    titulo: 'Saldo declarado do ERP × nossa apuração',
+    subtitulo: `${a.deposito || ''} · filial ${a.uf || '—'} · posição de ` +
+               `${brDate(a.dt)} · ${a.nome_arquivo}`,
+    aba: 'Saldo x apuração',
+    colunas: COLUNAS_SALDO,
+    linhas: vistasSaldo.map(x => ({
+      ...x, situacao_txt: (SIT_SALDO[x.situacao] || [x.situacao])[0] })),
+  });
+};
+
+$('saldo-arquivo').onchange = () => carregarSaldo($('saldo-arquivo').value);
+$('f-saldo').onchange = desenharSaldo;
+let tq;
+$('q-saldo').oninput = () => { clearTimeout(tq); tq = setTimeout(desenharSaldo, 200); };
+
+$('natureza').querySelectorAll('[data-nat]').forEach(b => b.onclick = () => {
+  $('natureza').querySelectorAll('[data-nat]').forEach(x => x.classList.toggle('on', x === b));
+  $('bloco-extrato').hidden = b.dataset.nat !== 'extrato';
+  $('bloco-saldo').hidden = b.dataset.nat !== 'saldo';
+  if (b.dataset.nat === 'saldo' && !saldo) carregarSaldo();
+});
 
 /* ------------------------------------------------------------- exportação */
 // As colunas de cada aba, na ordem em que aparecem na tela. O rótulo é o

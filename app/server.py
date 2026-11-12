@@ -301,6 +301,38 @@ def erp_arquivos(qs):
         "from erp_extrato_arquivo order by dt_ini desc, importado_em desc")
 
 
+def erp_saldos(qs):
+    """Fotos do saldo do ERP já importadas, da mais recente para a mais antiga."""
+    return query(
+        "select id, nome_arquivo, deposito, cnpj, uf, dt::text dt, linhas, itens, "
+        "       quantidade, vigente, problemas, importado_por, "
+        "       to_char(importado_em,'DD/MM/YYYY HH24:MI') importado "
+        "from erp_saldo_arquivo order by dt desc, importado_em desc")
+
+
+def erp_saldo(qs):
+    """A foto do saldo do ERP contra a nossa posição na mesma data."""
+    aid = int((qs.get("id") or ["0"])[0] or 0)
+    if not aid:
+        ultimo = query("select id from erp_saldo_arquivo "
+                       "where vigente order by dt desc, id desc limit 1")
+        if not ultimo:
+            return {"arquivo": None, "resumo": None, "itens": []}
+        aid = int(ultimo[0]["id"])
+    arq = query("select id, nome_arquivo, deposito, cnpj, uf, dt::text dt, linhas, "
+                "itens, quantidade, vigente, problemas "
+                "from erp_saldo_arquivo where id = %d" % aid)
+    if not arq:
+        return {"erro": "saldo não encontrado"}
+    resumo = query(f"select *, dt::text dt_txt from erp_saldo_resumo({aid})")
+    return {
+        "arquivo": arq[0],
+        "resumo": resumo[0] if resumo else None,
+        "itens": query(f"select *, ultima_mov::text ultima_mov_txt "
+                       f"from erp_saldo_confronto({aid})"),
+    }
+
+
 def erp_confronto(qs):
     """
     O extrato do ERP contra a nossa apuração pelos XML: resumo, item a item,
@@ -420,11 +452,11 @@ def importar_upload(body):
     destino = os.path.join(os.path.dirname(HERE), "xmls", "recebidos")
     os.makedirs(destino, exist_ok=True)
     import base64
-    from auditoria import carga, carga_ecd, carga_erp, ecd, erp
+    from auditoria import carga, carga_ecd, carga_erp, ecd, erp, saldo_erp
     gravados = []
     for arq in (body or {}).get("arquivos", []):
         nome = os.path.basename(arq.get("nome") or "")
-        if not nome.lower().endswith((".xml", ".txt", ".xlsx", ".xlsm")):
+        if not nome.lower().endswith((".xml", ".txt", ".xlsx", ".xlsm", ".json")):
             continue
         caminho = os.path.join(destino, nome)
         if "base64" in arq:
@@ -437,11 +469,26 @@ def importar_upload(body):
                 fh.write(arq.get("conteudo") or "")
         gravados.append(caminho)
     if not gravados:
-        return {"erro": "nenhum arquivo .xml, .txt ou .xlsx recebido"}
+        return {"erro": "nenhum arquivo .xml, .txt, .xlsx ou .json recebido"}
     res = []
     for c in gravados:
         if c.lower().endswith(".xml"):
             res.append(carga_nfe.importa(c))
+            continue
+        if c.lower().endswith(".json"):
+            # JSON: hoje só o saldo de produtos do ERP, reconhecido pelas
+            # colunas. É foto de posição, não movimento.
+            try:
+                if not saldo_erp.e_saldo_erp(c):
+                    raise ValueError("JSON não reconhecido — esperava o relatório "
+                                     "de saldo de produtos do ERP")
+                r = carga_erp.importa_saldo(c)
+                av = [f"Saldo do ERP em {r.dt}: {r.itens} itens, "
+                      f"depósito {r.deposito or '?'}"] +                      [f"{t}: {d}" for t, d in r.problemas]
+                res.append(carga_nfe.ResultadoNFe(os.path.basename(c), r.situacao, avisos=av))
+            except Exception as e:
+                res.append(carga_nfe.ResultadoNFe(os.path.basename(c), "ignorado",
+                                                  avisos=[f"{type(e).__name__}: {e}"]))
             continue
         if c.lower().endswith((".xlsx", ".xlsm")):
             # Planilha: hoje só o extrato de produtos do ERP, reconhecido pelo
@@ -678,6 +725,8 @@ ROUTES = {
         sql_periodo_bloqueios((qs.get("mes") or [""])[0])),
     "/api/erp": erp_arquivos,
     "/api/erp/confronto": erp_confronto,
+    "/api/erp/saldos": erp_saldos,
+    "/api/erp/saldo": erp_saldo,
     "/api/periodo/cfops": lambda qs: query(sql_conferencia_cfop(
         (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0])),
     "/api/periodo/cfop/itens": lambda qs: query(sql_conferencia_cfop_detalhe(

@@ -205,6 +205,24 @@ def rota_erp_confronto(qs):
             "alertas": consulta_rest("rpc/erp_extrato_alertas", {"p_arquivo_id": aid})}
 
 
+def rota_erp_saldo(qs):
+    """A foto do saldo do ERP contra a nossa posição. Sem id, a mais recente."""
+    aid = int((qs.get("id") or ["0"])[0] or 0)
+    if not aid:
+        ultimo = consulta_rest("erp_saldo_arquivo", {
+            "vigente": "is.true", "order": "dt.desc,id.desc", "limit": 1, "select": "id"})
+        if not ultimo:
+            return {"arquivo": None, "resumo": None, "itens": []}
+        aid = int(ultimo[0]["id"])
+    arq = consulta_rest("erp_saldo_arquivo", {"id": f"eq.{aid}"})
+    if not arq:
+        return {"erro": "saldo não encontrado"}
+    resumo = consulta_rest("rpc/erp_saldo_resumo", {"p_arquivo_id": aid})
+    return {"arquivo": arq[0],
+            "resumo": resumo[0] if resumo else None,
+            "itens": consulta_rest("rpc/erp_saldo_confronto", {"p_arquivo_id": aid})}
+
+
 def rota_cfop_detalhe(qs, funcao):
     """Itens ou notas de um CFOP do mes. Sem CFOP na consulta nao ha o que ver."""
     cfop = re.sub(r"\D", "", (qs.get("cfop") or [""])[0])[:4]
@@ -416,6 +434,9 @@ ROTAS = {
     "/api/erp": lambda qs: consulta_rest("erp_extrato_arquivo", {
         "order": "dt_ini.desc,importado_em.desc"}),
     "/api/erp/confronto": rota_erp_confronto,
+    "/api/erp/saldos": lambda qs: consulta_rest("erp_saldo_arquivo", {
+        "order": "dt.desc,importado_em.desc"}),
+    "/api/erp/saldo": rota_erp_saldo,
     "/api/periodo/cfops": lambda qs: consulta_rest(
         "rpc/conferencia_cfop", _faturamento_params(qs)),
     "/api/periodo/cfop/itens": lambda qs: rota_cfop_detalhe(
@@ -605,7 +626,16 @@ def importar_upload(corpo):
                 cod = "latin-1" if nome.lower().endswith(".txt") else "utf-8"
                 with open(caminho, "w", encoding=cod, errors="replace", newline="") as fh:
                     fh.write(arq.get("conteudo") or "")
-            if nome.lower().endswith((".xlsx", ".xlsm")):
+            if nome.lower().endswith(".json"):
+                # JSON: só o saldo de produtos do ERP — foto de posição.
+                from auditoria import carga_erp, saldo_erp as psaldo
+                if not psaldo.e_saldo_erp(caminho):
+                    raise ValueError("JSON não reconhecido — esperava o relatório "
+                                     "de saldo de produtos do ERP")
+                payload, _s = carga_erp.payload_saldo(caminho)
+                r = chama_rpc("importar_erp_saldo", payload)
+                probs = []
+            elif nome.lower().endswith((".xlsx", ".xlsm")):
                 # Planilha: só o extrato de produtos do ERP, reconhecido pelo
                 # cabeçalho. Chega sempre em base64 — é um zip.
                 from auditoria import carga_erp, erp as perp

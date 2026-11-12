@@ -115,6 +115,7 @@ local. O sistema aceita:
 | `.xml` | NF-e, NFS-e e evento de cancelamento |
 | `.txt` | EFD ICMS/IPI ou ECD — o sistema decide pelo conteúdo, não pela extensão |
 | `.xlsx` | Extrato de produtos por depósito do ERP (veja *Extrato do ERP*) |
+| `.json` | Saldo de produtos do ERP — a foto do estoque numa data |
 
 Pelo terminal, em qualquer volume:
 
@@ -122,6 +123,7 @@ Pelo terminal, em qualquer volume:
 python -m auditoria importar "C:\caminho\*.txt"
 python -m auditoria importar "C:\caminho\*.xml"
 python -m auditoria importar "C:\caminho\*.xlsx"
+python -m auditoria importar "C:\caminho\*.json"
 ```
 
 **A importação é idempotente.** O sistema calcula o SHA-256 de cada arquivo;
@@ -595,6 +597,40 @@ fiscal** (estoque que andou no ERP sem nota), **custo médio que salta mais de
 o saldo que o item tinha na linha anterior, ou quantidade quebrada em item
 contado por unidade. O custo médio alimenta o CMV: um salto desses muda o
 resultado do mês.
+
+### Saldo de produtos — a foto do estoque numa data
+
+Na tela **ERP**, o botão *Saldo declarado (foto)* trata o outro relatório do
+ERP: o **Saldo de produtos**, exportado em `.json`. Ele é uma foto — quantidade
+por produto, num depósito, numa data —, sem movimento, sem documento e sem
+custo. Arraste na mesma área de envio, ou:
+
+```bash
+python -m auditoria importar "C:\caminho\Saldo de produtos*.json"
+```
+
+A **data da posição** sai do nome do arquivo (`Saldo de produtos
+(20261112_131054).json` → 12/11/2026). Quando o nome não traz data, o sistema
+avisa que presumiu.
+
+**A foto não vira abertura nem Kardex.** Ela é confrontada com a nossa posição
+na mesma data e nada mais. Virar abertura mudaria a base de tudo o que já foi
+apurado naquela filial — isso é decisão sua, não efeito de uma importação.
+
+O confronto é item a item, com cinco situações: *confere*, *ERP maior*, *ERP
+menor*, *só no ERP* e *só na nossa apuração*.
+
+- **Exposição** é a diferença valorada pelo **nosso** custo médio, porque a foto
+  não traz custo. Item sem custo nosso fica com a exposição em branco e entra
+  na contagem de *itens sem custo*: o furo existe em quantidade e não dá para
+  medir em dinheiro. Arbitrar um custo aqui seria inventar número de auditoria.
+- **Última mov.** é a data do último movimento nosso daquele item. Quando ela é
+  antiga, a diferença quase sempre é **período que falta importar**, e não
+  estoque sumido — a nossa posição só conhece os meses que entraram.
+
+Quando o mesmo código aparece em mais de uma linha do arquivo (o ERP faz isso
+quando o produto tem mais de um cadastro), o saldo do item é a **soma**, e o
+aviso fica registrado na importação.
 
 ### Exportar o relatório (.xlsx ou PDF)
 

@@ -98,8 +98,22 @@ def cmd_importar(args):
         print("  Nada a importar.")
         return 1
     print(f"\nImportando {len(caminhos)} arquivo(s)\n" + "-" * 72)
-    from . import carga_ecd, carga_erp, carga_nfe, ecd, erp
+    from . import carga_ecd, carga_erp, carga_nfe, ecd, erp, saldo_erp
     for c in caminhos:
+        if c.lower().endswith(".json"):
+            # JSON: hoje só o saldo de produtos do ERP (foto de posição).
+            if not saldo_erp.e_saldo_erp(c):
+                print(f"  ignorado               {os.path.basename(c)[:56]}")
+                print("             ! JSON não reconhecido — esperava o relatório "
+                      "de saldo de produtos do ERP")
+                continue
+            rs = carga_erp.importa_saldo(c)
+            print(f"  {rs.situacao:<22} SALDO #{rs.arquivo_id}  {rs.arquivo[:50]}")
+            print(f"             {rs.itens} itens em {rs.dt} · depósito "
+                  f"{rs.deposito or '?'} · filial {rs.cnpj or '?'}")
+            for tipo, det in rs.problemas:
+                print(f"             ! {tipo}: {det[:96]}")
+            continue
         if c.lower().endswith((".xlsx", ".xlsm")):
             # Planilha: hoje só o extrato de produtos do ERP.
             if not erp.e_extrato_erp(c):
