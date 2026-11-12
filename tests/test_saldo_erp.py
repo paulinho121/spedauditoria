@@ -122,3 +122,49 @@ def test_json_sem_as_colunas_certas_e_recusado(tmp_path):
     caminho.write_text(json.dumps([{"a": 1}]), encoding="utf-8")
     with pytest.raises(ValueError):
         se.parse(str(caminho))
+
+
+# ------------------------------------------------- relatório exportado com custo
+
+COM_CUSTO = [
+    {"columnprodutoCodigo2": "5023", "columnprodutoNome3": "Quick Release Plate",
+     "columndeposito1": "DEP MCI SC", "columnsaldo7": "18",
+     "columncustoUnitario8": "41,00917", "columnvalortotal9": "738,16506"},
+    {"columnprodutoCodigo2": "3311", "columnprodutoNome3": "Carregador",
+     "columndeposito1": "DEP MCI SC", "columnsaldo7": "1",
+     "columncustoUnitario8": "0", "columnvalortotal9": None},        # custo zero
+    {"columnprodutoCodigo2": "P00002", "columnprodutoNome3": "SALVADO",
+     "columndeposito1": "DEP MCI SC", "columnsaldo7": "1",
+     "columncustoUnitario8": "865,9", "columnvalortotal9": "865,9"},
+]
+
+
+def test_le_custo_unitario_e_valor_total(tmp_path):
+    s = se.parse(arquivo(tmp_path, COM_CUSTO))
+    assert s.tem_custo and s.com_custo == 2
+    assert s.linhas[0]["custo_unit"] == pytest.approx(41.00917)
+    assert s.linhas[0]["valor_total"] == pytest.approx(738.16506)
+    # O total é o do ERP, com todas as casas — não a nossa conta arredondada.
+    assert s.valor == pytest.approx(738.17 + 865.9, abs=0.01)
+
+
+def test_custo_zero_com_saldo_e_avisado_e_nao_vira_valor(tmp_path):
+    s = se.parse(arquivo(tmp_path, COM_CUSTO))
+    # Zero é guardado como zero: é o que o ERP disse.
+    assert s.linhas[1]["custo_unit"] == 0 and s.linhas[1]["valor_total"] is None
+    aviso = [d for t, d in s.problemas if t == "custo_zerado"]
+    assert aviso and aviso[0].startswith("1 linha(s)") and "3311" in aviso[0]
+
+
+def test_valor_que_nao_fecha_com_saldo_vezes_custo_e_avisado(tmp_path):
+    regs = [dict(COM_CUSTO[0], columnvalortotal9="900")]
+    s = se.parse(arquivo(tmp_path, regs))
+    assert [d for t, d in s.problemas if t == "valor_nao_fecha"] \
+        == ["saldo × custo difere do valor total em: 5023"]
+
+
+def test_relatorio_so_com_quantidade_continua_valendo(tmp_path):
+    s = se.parse(arquivo(tmp_path))
+    assert not s.tem_custo and s.com_custo == 0 and s.valor == 0
+    assert s.linhas[0]["custo_unit"] is None
+    assert not [t for t, _ in s.problemas if t in ("custo_zerado", "valor_nao_fecha")]

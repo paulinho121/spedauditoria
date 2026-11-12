@@ -209,6 +209,9 @@ td.igual { color: var(--on-surface-variant); }
           <option value="">Todos os itens</option>
           <option value="com">Com valor</option>
           <option value="sem">Sem valor</option>
+          <option value="zero">Custo zero no ERP</option>
+          <option value="base">Valor completado pela nossa base</option>
+          <option value="difere">Custo do ERP difere do documento (&gt; 10%)</option>
         </select>
         <input type="search" id="q-posicao" placeholder="Código, descrição ou NCM…"
                autocomplete="off" style="min-width:260px">
@@ -220,9 +223,12 @@ td.igual { color: var(--on-surface-variant); }
           <thead><tr>
             <th>Código</th><th class="desc">Descrição</th><th>NCM</th><th>Un.</th>
             <th class="num">Quantidade</th><th class="num">Custo unit.</th>
-            <th class="num">Valor</th><th>De onde vem o custo</th><th>Data do custo</th>
+            <th class="num">Valor</th><th>De onde vem o custo</th>
+            <th class="num" title="O custo que a nossa base tem para o mesmo código, por documento">Custo documentado</th>
+            <th class="num" title="Custo do ERP em relação ao custo documentado">Dif.</th>
+            <th>Data do custo</th>
           </tr></thead>
-          <tbody><tr><td colspan="9" class="skel">—</td></tr></tbody>
+          <tbody><tr><td colspan="11" class="skel">—</td></tr></tbody>
         </table>
       </div>
       <p class="muted" style="font-size:12.5px;margin:10px 0 24px;line-height:1.6">
@@ -230,14 +236,19 @@ td.igual { color: var(--on-surface-variant); }
         <b>linha a linha como veio no arquivo</b>: quando o ERP traz o mesmo código
         em mais de uma linha (dois cadastros do produto), cada uma aparece com a sua
         descrição e o seu saldo — nada é somado.
-        O arquivo de saldo não traz preço: o <b>custo</b> é o que a base conhece para
-        o mesmo código, nesta ordem — custo médio da própria filial na data, última
-        entrada na filial, <b>nota de remessa para armazém</b> emitida pela filial
-        (CFOP 5905/6905, que sai pelo valor da mercadoria), última entrada do código
-        em outra filial, custo médio que o ERP informou num extrato de movimentos.
-        <b>Preço de venda não entra</b>:
-        estoque se mede a custo. Item sem nenhuma dessas fontes fica sem valor, e o
-        total valorado é <b>parcial</b> enquanto houver item nessa condição.
+        O <b>valor</b> é o que o próprio ERP declara, quando o relatório vem com as
+        colunas de custo unitário e valor total. Onde o ERP declara <b>custo
+        zero</b> — ou quando o relatório vem só com quantidade —, vale o custo que a
+        nossa base conhece para o mesmo código, nesta ordem: custo médio da própria
+        filial na data, última entrada na filial, <b>nota de remessa para
+        armazém</b> emitida pela filial (CFOP 5905/6905, que sai pelo valor da
+        mercadoria), última entrada do código em outra filial, custo médio que o ERP
+        informou num extrato de movimentos. <b>Preço de venda não entra</b>: estoque
+        se mede a custo. Linha sem nenhuma dessas fontes fica sem valor.
+        <b>Custo documentado</b> é esse custo da nossa base posto ao lado do que o
+        ERP declarou, e <b>Dif.</b> é quanto o ERP está acima ou abaixo dele — é
+        onde o custo do ERP é conferido contra documento. Diferença contra custo de
+        <i>outra</i> filial ou de extrato antigo é indício, não divergência.
       </p>
     </section>
 
@@ -246,7 +257,7 @@ td.igual { color: var(--on-surface-variant); }
       <div class="lbl">O que esta comparação é — e o que ela não é</div>
       <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
         O saldo de produtos é uma <b>foto</b>: quantidade por produto, numa data,
-        sem movimento, sem documento e sem custo. Ela é confrontada com a nossa
+        sem movimento e sem documento. Ela é confrontada com a nossa
         posição <b>na mesma data</b>, e não vira abertura nem Kardex — isso
         mudaria a base de tudo o que já foi apurado nesta filial, e é decisão
         sua, não efeito de uma importação.
@@ -285,8 +296,8 @@ td.igual { color: var(--on-surface-variant); }
       </table>
     </div>
     <p class="muted" style="font-size:12.5px;margin:10px 0 24px;line-height:1.6">
-      <b>Exposição</b> é a diferença valorada pelo <b>nosso</b> custo médio —
-      a foto do ERP não traz custo. Item sem custo nosso fica com a exposição em
+      <b>Exposição</b> é a diferença valorada pelo <b>nosso</b> custo médio, que
+      é o custo apurado por documento. Item sem custo nosso fica com a exposição em
       branco: o furo existe em quantidade e não dá para medir em dinheiro, e
       arbitrar um custo aqui seria inventar número de auditoria.
       <b>Última mov.</b> é a data do último movimento nosso daquele item: quando
@@ -601,14 +612,32 @@ let vistasPosicao = [];
 // Quantidade com a fração que tiver: 70,76 un não pode aparecer como 71.
 const qt = v => (+v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 const temValor = x => x.valor !== null && x.valor !== undefined && x.valor !== '';
+const doErp = x => x.custo_origem === 'erp_arquivo';
+const temDif = x => x.dif_pct !== null && x.dif_pct !== undefined && x.dif_pct !== '';
+/** Diferença em %, com sinal. Até 1% é a mesma coisa; acima de 10% é para olhar. */
+function difPct(x) {
+  if (!temDif(x)) return '<span class="muted">—</span>';
+  const v = +x.dif_pct, a = Math.abs(v);
+  const t = (v > 0 ? '+' : '') + v.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%';
+  return a <= 1 ? `<span class="muted">${t}</span>`
+       : `<span class="chip ${a > 10 ? 'err' : 'warn'}">${t}</span>`;
+}
 
 /** Totais da foto valorada. O que ficou sem custo é contado à parte, sempre. */
 function totaisPosicao(xs) {
-  const t = { itens: xs.length, qtd: 0, com: 0, qtdCom: 0, valor: 0, sem: 0, qtdSem: 0 };
+  const t = { itens: xs.length, qtd: 0, com: 0, qtdCom: 0, valor: 0, sem: 0, qtdSem: 0,
+              erp: 0, valorErp: 0, base: 0, qtdBase: 0, valorBase: 0, zero: 0, qtdZero: 0 };
   xs.forEach(x => {
-    t.qtd += +x.qtd || 0;
-    if (temValor(x)) { t.com++; t.qtdCom += +x.qtd || 0; t.valor += +x.valor || 0; }
-    else { t.sem++; t.qtdSem += +x.qtd || 0; }
+    const q = +x.qtd || 0;
+    t.qtd += q;
+    if (temValor(x)) { t.com++; t.qtdCom += q; t.valor += +x.valor || 0; }
+    else { t.sem++; t.qtdSem += q; }
+    // De quem é o valor: do ERP, ou da nossa base porque o ERP declarou zero.
+    if (doErp(x)) { t.erp++; t.valorErp += +x.valor || 0; }
+    else {
+      t.zero++; t.qtdZero += q;
+      if (temValor(x)) { t.base++; t.qtdBase += q; t.valorBase += +x.valor || 0; }
+    }
   });
   return t;
 }
@@ -619,22 +648,49 @@ function resumirPosicao() {
   // Código que o ERP exporta em mais de uma linha: são cadastros diferentes,
   // cada um com o seu saldo. Aqui eles NÃO são somados.
   const rep = new Set(xs.filter(x => +x.linhas_no_arquivo > 1).map(x => x.cod_item)).size;
-  $('posicao-kpis').innerHTML = [
-    card('Estoque declarado', qt(t.qtd) + ' un',
-         `${n(t.itens)} linhas, como vieram no arquivo do ERP` +
-         (rep ? ` · ${n(rep)} código(s) em mais de uma linha` : '')),
+  const declarado = card('Estoque declarado', qt(t.qtd) + ' un',
+    `${n(t.itens)} linhas, como vieram no arquivo do ERP` +
+    (rep ? ` · ${n(rep)} código(s) em mais de uma linha` : ''));
+  const semValor = card('Sem valor', n(t.sem),
+    `${qt(t.qtdSem)} un · ${pct(t.qtdSem, t.qtd)} das unidades`, t.sem ? 'alert' : 'good');
+  // O relatório veio com custo? Então o número principal é o do ERP, e o que a
+  // nossa base completou aparece separado — são duas origens, não uma soma só.
+  $('posicao-kpis').innerHTML = (t.erp ? [
+    declarado,
+    card('Valor declarado pelo ERP', money(t.valorErp),
+         `${n(t.erp)} linhas com custo no relatório`),
+    card('Completado pela nossa base', money(t.valorBase),
+         `${n(t.base)} das ${n(t.zero)} linhas com custo zero no ERP`,
+         t.zero ? 'alert' : ''),
+    card('Estoque valorado', money(t.valor),
+         t.sem ? `${n(t.com)} de ${n(t.itens)} linhas — parcial` : 'todas as linhas',
+         t.sem ? 'alert' : 'good'),
+    semValor,
+  ] : [
+    declarado,
     card('Valor apurado', money(t.valor),
          t.sem ? `só das ${n(t.com)} linhas com custo conhecido — parcial`
                : 'todas as linhas valoradas', t.sem ? 'alert' : 'good'),
     card('Com valor', n(t.com), `${qt(t.qtdCom)} un · ${pct(t.com, t.itens)} das linhas`),
-    card('Sem valor', n(t.sem),
-         `${qt(t.qtdSem)} un · ${pct(t.qtdSem, t.qtd)} das unidades`, t.sem ? 'alert' : 'good'),
-  ].join('');
+    semValor,
+  ]).join('');
 
   // O total parcial tem de vir com o tamanho do que falta, na mesma tela.
   const av = $('posicao-aviso');
   av.hidden = !t.sem;
-  if (t.sem) av.innerHTML = `
+  if (t.sem && t.erp) av.innerHTML = `
+    <div class="lbl">O ERP declara custo zero em ${n(t.zero)} linhas com saldo</div>
+    <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
+      O valor que o ERP declara, <b>${money(t.valorErp)}</b>, cobre ${n(t.erp)}
+      linhas. Nas outras <b>${n(t.zero)}</b> (${qt(t.qtdZero)} un) o relatório traz
+      <b>custo zero</b> — produto com saldo e sem valor no próprio ERP. Para
+      <b>${n(t.base)}</b> delas a nossa base tem custo por documento, e elas somam
+      <b>${money(t.valorBase)}</b>; as <b>${n(t.sem)}</b> restantes
+      (${qt(t.qtdSem)} un) não têm custo em lugar nenhum e ficam sem valor. O
+      estoque valorado, <b>${money(t.valor)}</b>, é a soma das duas origens — a
+      coluna <i>De onde vem o custo</i> diz qual é em cada linha.
+    </p>`;
+  else if (t.sem) av.innerHTML = `
     <div class="lbl">Este valor não é o valor do estoque inteiro</div>
     <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
       <b>${money(t.valor)}</b> é quanto valem as <b>${n(t.com)}</b> linhas
@@ -651,7 +707,11 @@ function resumirPosicao() {
 function desenharPosicao() {
   const f = $('f-posicao').value, q = $('q-posicao').value.trim().toUpperCase();
   const vistas = (saldo.posicao || []).filter(x =>
-    (!f || (f === 'com') === temValor(x)) &&
+    (!f || (f === 'com' ? temValor(x)
+          : f === 'sem' ? !temValor(x)
+          : f === 'zero' ? !doErp(x)
+          : f === 'base' ? !doErp(x) && temValor(x)
+          : temDif(x) && Math.abs(+x.dif_pct) > 10)) &&
     (!q || `${x.cod_item} ${x.descr_item || ''} ${x.ncm || ''}`.toUpperCase().includes(q)));
   vistasPosicao = vistas;
   const t = totaisPosicao(vistas);
@@ -671,12 +731,15 @@ function desenharPosicao() {
       <td class="num">${temValor(x) ? '<b>' + money(x.valor) + '</b>'
           : '<span class="muted" title="Sem custo conhecido para este código">sem valor</span>'}</td>
       <td>${x.custo_fonte ? esc(x.custo_fonte) : '<span class="muted">—</span>'}</td>
+      <td class="num"${x.custo_base_fonte ? ` title="${esc(x.custo_base_fonte)}"` : ''}>${
+          doErp(x) && +x.custo_base ? money(x.custo_base) : '<span class="muted">—</span>'}</td>
+      <td class="num">${difPct(x)}</td>
       <td class="mono">${dt ? brDate(dt) : '<span class="muted">—</span>'}</td>`;
   }, vistas.length ? `<tfoot><tr><td colspan="4">${n(t.itens)} linha(s)` +
       (t.sem ? ` · ${n(t.sem)} sem valor` : '') + `</td>
       <td class="num">${qt(t.qtd)}</td><td></td>
       <td class="num">${money(t.valor)}</td>
-      <td colspan="2">${t.sem ? 'total parcial' : ''}</td></tr></tfoot>` : '');
+      <td colspan="4">${t.sem ? 'total parcial' : ''}</td></tr></tfoot>` : '');
 }
 
 const COLUNAS_POSICAO = [
@@ -689,6 +752,10 @@ const COLUNAS_POSICAO = [
   { campo: 'valor', rotulo: 'Valor', tipo: 'dinheiro', soma: true },
   { campo: 'custo_fonte', rotulo: 'Origem do custo' },
   { campo: 'custo_dt_txt', rotulo: 'Data do custo', tipo: 'data', marcada: false },
+  { campo: 'custo_erp', rotulo: 'Custo no ERP', tipo: 'dinheiro', marcada: false },
+  { campo: 'custo_base', rotulo: 'Custo documentado', tipo: 'dinheiro', marcada: false },
+  { campo: 'custo_base_fonte', rotulo: 'Origem do custo documentado', marcada: false },
+  { campo: 'dif_pct', rotulo: 'Dif. % ERP × documento', tipo: 'numero', marcada: false },
 ];
 
 $('exportar-posicao').onclick = () => {
@@ -699,8 +766,11 @@ $('exportar-posicao').onclick = () => {
     // O aviso de total parcial viaja dentro do arquivo: o relatório circula
     // sem a tela, e o número não pode chegar sozinho.
     subtitulo: `${a.deposito || ''} · ${n(t.itens)} linhas, ${qt(t.qtd)} un` +
-      (t.sem ? ` · valor parcial: ${n(t.sem)} linhas (${qt(t.qtdSem)} un) sem custo conhecido`
-             : ' · todos valorados'),
+      (t.erp ? ` · ${money(t.valorErp)} pelo custo do ERP` +
+               (t.base ? ` + ${money(t.valorBase)} pela nossa base (${n(t.base)} linhas com custo zero no ERP)` : '')
+             : '') +
+      (t.sem ? ` · ${n(t.sem)} linhas (${qt(t.qtdSem)} un) sem custo — total parcial`
+             : ' · todas valoradas'),
     aba: 'Estoque declarado',
     colunas: COLUNAS_POSICAO,
     linhas: vistasPosicao.map(x => ({ ...x, custo_dt_txt: x.custo_dt_txt || x.custo_dt })),

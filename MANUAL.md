@@ -602,8 +602,8 @@ resultado do mês.
 
 Na tela **ERP**, o botão *Saldo declarado (foto)* trata o outro relatório do
 ERP: o **Saldo de produtos**, exportado em `.json`. Ele é uma foto — quantidade
-por produto, num depósito, numa data —, sem movimento, sem documento e sem
-custo. Arraste na mesma área de envio, ou:
+por produto, num depósito, numa data —, sem movimento e sem documento. Arraste
+na mesma área de envio, ou:
 
 ```bash
 python -m auditoria importar "C:\caminho\Saldo de produtos*.json"
@@ -628,9 +628,16 @@ e **nada é somado**: quem consulta um desses produtos no ERP vê o saldo daquel
 linha, e o relatório tem de mostrar o mesmo número. A soma por código só existe
 na aba de confronto, porque a nossa apuração é por código.
 
-O arquivo de saldo **não traz preço**. O custo de cada produto é o que a base
-conhece para o mesmo código, nesta ordem, e a coluna *De onde vem o custo* diz
-qual foi usado:
+**Exporte o relatório com as colunas *Custo Unitário* e *Valor Total*
+visíveis.** Quando elas vêm, o valor de cada linha é o que o próprio ERP
+declara, e o total fecha com o do ERP. Enviar de novo o relatório da mesma data
+substitui a foto anterior, que fica guardada.
+
+O ERP costuma trazer **custo zero em produto com saldo**. Isso é contado à
+parte e avisado na importação: não é falta de informação, é o ERP dizendo zero.
+Nessas linhas — e em todas, quando o relatório vem só com quantidade — o custo é
+o que a nossa base conhece para o mesmo código, nesta ordem, e a coluna *De onde
+vem o custo* diz qual foi usado:
 
 1. custo médio da própria filial na data da foto (a nossa apuração);
 2. última entrada na própria filial — inventário de abertura ou nota;
@@ -647,8 +654,17 @@ sozinha.
 **Preço de venda não entra.** Estoque se mede a custo, e o preço da última
 saída levaria a margem para dentro do total.
 
+A tela separa as duas origens: **Valor declarado pelo ERP**, **Completado pela
+nossa base** e a soma, **Estoque valorado**.
+
+As colunas *Custo documentado* e *Dif.* põem o custo da nossa base ao lado do
+que o ERP declarou. Até 1% é a mesma coisa; acima de 10% a diferença vem
+marcada, e o filtro *Custo do ERP difere do documento* lista só essas. Diferença
+contra nota da **própria filial** é para investigar; contra custo de outra
+filial ou de extrato antigo é só indício.
+
 Produto sem nenhuma dessas fontes fica **sem valor** — não recebe custo
-arbitrado. Enquanto houver produto assim, o *Valor apurado* é **parcial**: a
+arbitrado. Enquanto houver produto assim, o *Estoque valorado* é **parcial**: a
 tela diz quantos produtos e quantas unidades ficaram de fora, e o mesmo aviso
 vai escrito no cabeçalho do arquivo exportado, porque o relatório circula sem
 a tela. Para fechar o total, importe as notas de entrada ou de remessa para

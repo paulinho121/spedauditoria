@@ -3,9 +3,15 @@
 Leitura do relatório "Saldo de produtos" do ERP (JSON).
 
 É uma FOTO: o saldo de cada produto num depósito, numa data. Não tem
-movimento, não tem documento, não tem custo — só quantidade. Por isso ela não
-vira Kardex nem abertura: entra como **posição declarada**, ao lado da nossa
-apuração, para ser confrontada com ela na mesma data.
+movimento nem documento. Por isso ela não vira Kardex nem abertura: entra como
+**posição declarada**, ao lado da nossa apuração, para ser confrontada com ela
+na mesma data.
+
+O relatório pode vir só com quantidade ou também com **custo unitário** e
+**valor total** — depende das colunas que quem exportou deixou visíveis. Quando
+vêm, são o custo que o ERP declara: guardados como vieram, linha a linha. Custo
+zero em produto com saldo não é "sem informação", é o ERP dizendo zero — e isso
+é contado à parte, porque estoque com saldo e custo zero é achado, não lacuna.
 
 O ERP exporta as colunas com nome gerado ("columnprodutoCodigo2"), onde o
 número é só a ordem na tela. O leitor casa pelo nome sem o prefixo e sem o
@@ -35,6 +41,9 @@ CAMPOS = {
     "deposito": ["deposito", "almoxarifado"],
     "local": ["localescrituracao", "local"],
     "saldo": ["saldo", "saldoatual", "quantidade", "qtd", "estoque"],
+    "custo_unit": ["custounitario", "customedio", "custounit", "custo",
+                   "precocusto", "precodecusto", "valorunitario"],
+    "valor_total": ["valortotal", "custototal", "valorestoque", "total", "valor"],
 }
 
 
@@ -114,6 +123,9 @@ class SaldoERP:
     linhas: list = field(default_factory=list)
     itens: int = 0
     quantidade: float = 0.0
+    tem_custo: bool = False      # o relatório veio com a coluna de custo
+    com_custo: int = 0           # linhas com custo maior que zero
+    valor: float = 0.0           # soma do valor declarado pelo ERP
     problemas: list = field(default_factory=list)
 
 
@@ -183,6 +195,8 @@ def parse(caminho, data=None):
             "deposito": dep or None,
             "local": (str(pega(r, "local") or "").strip() or None),
             "qtd": qtd,
+            "custo_unit": numero(pega(r, "custo_unit")),
+            "valor_total": numero(pega(r, "valor_total")),
         })
 
     s.itens = len({l["cod_item"] for l in s.linhas})
@@ -198,4 +212,34 @@ def parse(caminho, data=None):
                             + (" …" if len(repetidos) > 20 else "")))
     if len(s.depositos) > 1:
         s.problemas.append(("varios_depositos", ", ".join(s.depositos)))
+
+    s.tem_custo = "custo_unit" in m
+    if s.tem_custo:
+        zerados, nao_fecha = [], []
+        for l in s.linhas:
+            cu, vt = l["custo_unit"], l["valor_total"]
+            if not cu or cu <= 0:
+                if l["qtd"] > 0:
+                    zerados.append(l)
+                continue
+            s.com_custo += 1
+            calc = l["qtd"] * cu
+            # O total do ERP vale mais que a nossa conta: ele multiplica com
+            # todas as casas. Só falta o total quando a coluna não veio.
+            s.valor += vt if vt is not None else calc
+            if vt is not None and abs(calc - vt) > 0.02:
+                nao_fecha.append(l["cod_item"])
+        s.valor = round(s.valor, 2)
+        if zerados:
+            un = sum(l["qtd"] for l in zerados)
+            s.problemas.append((
+                "custo_zerado",
+                f"{len(zerados)} linha(s) com saldo e custo zero no ERP "
+                f"({un:g} un): " + ", ".join(l["cod_item"] for l in zerados[:12])
+                + (" …" if len(zerados) > 12 else "")))
+        if nao_fecha:
+            s.problemas.append((
+                "valor_nao_fecha",
+                "saldo × custo difere do valor total em: "
+                + ", ".join(nao_fecha[:12]) + (" …" if len(nao_fecha) > 12 else "")))
     return s
