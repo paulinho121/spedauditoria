@@ -613,6 +613,35 @@ A **data da posição** sai do nome do arquivo (`Saldo de produtos
 (20261112_131054).json` → 12/11/2026). Quando o nome não traz data, o sistema
 avisa que presumiu.
 
+A tela tem duas abas: **Estoque declarado, com valor** — só o que o ERP diz
+ter — e **Confronto com a nossa apuração**.
+
+#### Estoque declarado, com valor
+
+É a foto isolada, pronta para relatório: código, descrição, NCM, quantidade,
+custo unitário e valor, com o total no rodapé. Aqui não entra a nossa posição.
+
+O arquivo de saldo **não traz preço**. O custo de cada produto é o que a base
+conhece para o mesmo código, nesta ordem, e a coluna *De onde vem o custo* diz
+qual foi usado:
+
+1. custo médio da própria filial na data da foto (a nossa apuração);
+2. última entrada na própria filial — inventário de abertura ou nota;
+3. última entrada do mesmo código em outra filial da empresa;
+4. custo médio que o próprio ERP informou num extrato de movimentos.
+
+**Preço de venda não entra.** Estoque se mede a custo, e o preço da última
+saída levaria a margem para dentro do total.
+
+Produto sem nenhuma dessas fontes fica **sem valor** — não recebe custo
+arbitrado. Enquanto houver produto assim, o *Valor apurado* é **parcial**: a
+tela diz quantos produtos e quantas unidades ficaram de fora, e o mesmo aviso
+vai escrito no cabeçalho do arquivo exportado, porque o relatório circula sem
+a tela. Para fechar o total, importe as notas de entrada desses produtos ou o
+extrato de movimentos do ERP daquela filial (ele traz o custo médio).
+
+#### Confronto com a nossa apuração
+
 **A foto não vira abertura nem Kardex.** Ela é confrontada com a nossa posição
 na mesma data e nada mais. Virar abertura mudaria a base de tudo o que já foi
 apurado naquela filial — isso é decisão sua, não efeito de uma importação.
@@ -651,6 +680,10 @@ O arquivo leva o título, a filial, o período e o nome do extrato de origem no
 cabeçalho, e o rodapé do PDF traz a contagem de linhas e a paginação. O nome do
 arquivo sai sem acento e com a data (`extrato_do_erp_item_a_item_20261110.xlsx`),
 porque ele vai virar anexo de e-mail.
+
+Nas tabelas de valor — o estoque declarado, por exemplo — o arquivo ganha uma
+**linha de total** no fim. Na planilha ela é uma fórmula sobre as linhas, e não
+um número colado: se você apagar ou corrigir uma linha, o total acompanha.
 
 O limite é de 20.000 linhas por exportação; acima disso, filtre antes.
 

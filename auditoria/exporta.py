@@ -14,6 +14,10 @@ linhas. A coluna diz o nome da chave, o rótulo que aparece e o tipo:
 Tipo decide alinhamento e formato — 'texto' (padrão), 'numero', 'dinheiro',
 'data'. Número sai como número, e não como texto: planilha com número em
 formato de texto não soma, e quem recebe o relatório vai querer somar.
+
+Coluna com "soma": True ganha uma linha de total no fim. Na planilha o total é
+uma fórmula sobre as linhas, e não um número colado: quem apagar ou corrigir
+uma linha vê o total acompanhar.
 """
 import datetime
 import io
@@ -51,6 +55,7 @@ WORKBOOK_XLSX = """<?xml version="1.0" encoding="UTF-8"?>
 <sheets><sheet name="{aba}" sheetId="1" r:id="rId1"/></sheets></workbook>"""
 
 # 0 texto · 1 cabeçalho (negrito) · 2 dinheiro · 3 número · 4 título
+# 5 total em dinheiro · 6 total em número (negrito, com o fundo do cabeçalho)
 ESTILOS = """<?xml version="1.0" encoding="UTF-8"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <numFmts count="2">
@@ -69,12 +74,14 @@ ESTILOS = """<?xml version="1.0" encoding="UTF-8"?>
 </fills>
 <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="5">
+<cellXfs count="7">
   <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
   <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
   <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
   <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
   <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+  <xf numFmtId="164" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyNumberFormat="1"/>
+  <xf numFmtId="165" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyNumberFormat="1"/>
 </cellXfs>
 </styleSheet>"""
 
@@ -107,8 +114,18 @@ def _numero(v):
         return None
 
 
-def xlsx(titulo, colunas, linhas, aba="Relatório"):
-    """Planilha de uma aba: título, cabeçalho e as linhas."""
+def totais(colunas, linhas):
+    """Soma de cada coluna marcada com "soma". Célula vazia não entra."""
+    t = {}
+    for c in colunas:
+        if c.get("soma") and c.get("tipo") in NUM:
+            t[c["campo"]] = round(sum(_numero(l.get(c["campo"])) or 0.0
+                                      for l in linhas), 6)
+    return t
+
+
+def xlsx(titulo, colunas, linhas, aba="Relatório", subtitulo=""):
+    """Planilha de uma aba: título, cabeçalho, as linhas e o total, se pedido."""
     corpo, n = [], 0
 
     def celula(ref, valor, estilo, numerica=False):
@@ -121,8 +138,11 @@ def xlsx(titulo, colunas, linhas, aba="Relatório"):
     corpo.append(f'<row r="{n}">{celula("A%d" % n, titulo, 4)}</row>')
     n += 1
     corpo.append(f'<row r="{n}">{celula("A%d" % n, _carimbo(), 0)}</row>')
-    n += 1  # linha em branco separando o título da tabela
+    n += 1  # separa o título da tabela; leva o subtítulo, quando há
+    if subtitulo:
+        corpo.append(f'<row r="{n}">{celula("A%d" % n, subtitulo, 0)}</row>')
     n += 1
+    primeira = n + 1
     corpo.append(f'<row r="{n}">' + "".join(
         celula(f"{_col(i)}{n}", c.get("rotulo") or c["campo"], 1)
         for i, c in enumerate(colunas)) + "</row>")
@@ -140,6 +160,22 @@ def xlsx(titulo, colunas, linhas, aba="Relatório"):
             else:
                 cs.append(celula(ref, formata(v, c.get("tipo")) if c.get("tipo") == "data"
                                  else ("" if v is None else v), 0))
+        corpo.append(f'<row r="{n}">' + "".join(cs) + "</row>")
+
+    soma = totais(colunas, linhas)
+    if soma and linhas:
+        ultima, n = n, n + 1
+        cs = []
+        for i, c in enumerate(colunas):
+            ref = f"{_col(i)}{n}"
+            if c["campo"] in soma:
+                faixa = f"{_col(i)}{primeira}:{_col(i)}{ultima}"
+                # Fórmula com o valor já calculado ao lado: abre certo também em
+                # leitor que não recalcula.
+                cs.append(f'<c r="{ref}" s="{5 if c.get("tipo") == "dinheiro" else 6}">'
+                          f"<f>SUM({faixa})</f><v>{soma[c['campo']]!r}</v></c>")
+            else:
+                cs.append(celula(ref, "Total" if i == 0 else "", 1))
         corpo.append(f'<row r="{n}">' + "".join(cs) + "</row>")
 
     larguras = "".join(
@@ -207,6 +243,7 @@ def formata(valor, tipo):
 
 PAGINA = (842, 595)          # A4 deitado: tabela larga cabe melhor
 MARGEM = 34
+_TOTAL = "__total__"       # marca a linha de total; não colide com campo
 
 # Métricas da Helvetica (milésimos do corpo) para o ASCII imprimível.
 _W = {
@@ -268,13 +305,24 @@ def pdf(titulo, subtitulo, colunas, linhas):
     topo = PAGINA[1] - MARGEM - 34
     por_pagina = max(1, int((topo - MARGEM - 16) / altura_linha))
 
+    # O total entra como última linha da tabela, em negrito. Vai na paginação
+    # junto com as outras: nunca fica espremido no rodapé.
+    soma = totais(colunas, linhas)
+    corpo_tab = list(linhas)
+    if soma and linhas:
+        total_linha = dict(soma)
+        if colunas[0]["campo"] not in soma:
+            total_linha[colunas[0]["campo"]] = "Total"
+        total_linha[_TOTAL] = True
+        corpo_tab.append(total_linha)
+
     paginas, i = [], 0
     while True:
-        paginas.append(linhas[i:i + por_pagina])
+        paginas.append(corpo_tab[i:i + por_pagina])
         i += por_pagina
-        if i >= len(linhas):
+        if i >= len(corpo_tab):
             break
-    if not linhas:
+    if not corpo_tab:
         paginas = [[]]
 
     fluxos = []
@@ -300,12 +348,22 @@ def pdf(titulo, subtitulo, colunas, linhas):
         y -= altura_linha
 
         for linha in pagina:
+            e_total = bool(linha.get(_TOTAL))
+            if e_total:
+                s.append("0.90 0.91 0.92 rg %.1f %.1f %.1f %.1f re f"
+                         % (MARGEM, y - 3, larg_util, altura_linha))
+                s.append("0 g")
             x = MARGEM
             for c, w in zip(colunas, larguras):
-                v = _corta(formata(linha.get(c["campo"]), c.get("tipo")), corpo, w - 6)
+                # No total só aparecem as colunas somadas e o rótulo; e o
+                # rótulo é texto mesmo quando a primeira coluna é numérica.
+                bruto = linha.get(c["campo"])
+                v = (str(bruto) if e_total and isinstance(bruto, str)
+                     else formata(bruto, c.get("tipo")))
+                v = _corta(v, corpo, w - 6)
                 px = x + w - 3 - _larg(v, corpo) if c.get("tipo") in NUM else x + 3
-                s.append("BT /F1 %.1f Tf 1 0 0 1 %.1f %.1f Tm (%s) Tj ET"
-                         % (corpo, px, y, _txt(v)))
+                s.append("BT /%s %.1f Tf 1 0 0 1 %.1f %.1f Tm (%s) Tj ET"
+                         % ("F2" if e_total else "F1", corpo, px, y, _txt(v)))
                 x += w
             y -= altura_linha
 

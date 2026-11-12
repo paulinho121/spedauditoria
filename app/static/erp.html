@@ -194,6 +194,49 @@ td.igual { color: var(--on-surface-variant); }
       <span class="muted" id="saldo-info"></span>
     </div>
 
+    <div class="abas" id="saldo-abas" style="margin:0 0 16px">
+      <button data-saldo="posicao" class="on">Estoque declarado, com valor</button>
+      <button data-saldo="confronto">Confronto com a nossa apuração</button>
+    </div>
+
+    <section id="saldo-posicao">
+      <section class="grid kpis" id="posicao-kpis"><div class="skel">nenhuma foto importada ainda</div></section>
+
+      <div id="posicao-aviso" hidden class="card alert" style="margin:16px 0 0"></div>
+
+      <div class="controls" style="margin:16px 0 12px">
+        <select id="f-posicao">
+          <option value="">Todos os itens</option>
+          <option value="com">Com valor</option>
+          <option value="sem">Sem valor</option>
+        </select>
+        <input type="search" id="q-posicao" placeholder="Código, descrição ou NCM…"
+               autocomplete="off" style="min-width:260px">
+        <button id="exportar-posicao" style="margin-left:auto">Exportar ↓</button>
+      </div>
+
+      <div class="wrap">
+        <table id="tbl-posicao">
+          <thead><tr>
+            <th>Código</th><th class="desc">Descrição</th><th>NCM</th><th>Un.</th>
+            <th class="num">Quantidade</th><th class="num">Custo unit.</th>
+            <th class="num">Valor</th><th>De onde vem o custo</th><th>Data do custo</th>
+          </tr></thead>
+          <tbody><tr><td colspan="9" class="skel">—</td></tr></tbody>
+        </table>
+      </div>
+      <p class="muted" style="font-size:12.5px;margin:10px 0 24px;line-height:1.6">
+        Aqui está <b>só o que o ERP declara ter</b>, sem a nossa posição misturada.
+        O arquivo de saldo não traz preço: o <b>custo</b> é o que a base conhece para
+        o mesmo código, nesta ordem — custo médio da própria filial na data, última
+        entrada na filial, última entrada do código em outra filial, custo médio que
+        o ERP informou num extrato de movimentos. <b>Preço de venda não entra</b>:
+        estoque se mede a custo. Item sem nenhuma dessas fontes fica sem valor, e o
+        total valorado é <b>parcial</b> enquanto houver item nessa condição.
+      </p>
+    </section>
+
+    <section id="saldo-confronto" hidden>
     <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
       <div class="lbl">O que esta comparação é — e o que ela não é</div>
       <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
@@ -244,6 +287,7 @@ td.igual { color: var(--on-surface-variant); }
       <b>Última mov.</b> é a data do último movimento nosso daquele item: quando
       ela é antiga, a diferença é quase sempre o período que falta importar.
     </p>
+    </section><!-- /saldo-confronto -->
   </div><!-- /bloco-saldo -->
 </main>
 
@@ -500,7 +544,7 @@ async function carregarSaldo(id) {
   try { arqs = await api('/api/erp/saldos'); } catch (e) { return falha(e); }
   if (!arqs.length) {
     $('saldo-arquivo').innerHTML = '<option>nenhuma foto importada</option>';
-    $('saldo-kpis').innerHTML =
+    $('saldo-kpis').innerHTML = $('posicao-kpis').innerHTML =
       '<div class="skel">Envie o .json de saldo de produtos acima para começar.</div>';
     return;
   }
@@ -543,7 +587,120 @@ async function carregarSaldo(id) {
   ].join('');
 
   desenharSaldo();
+  resumirPosicao();
+  desenharPosicao();
 }
+
+/* ------------------------------ a foto sozinha: o que o ERP declara, e quanto vale */
+let vistasPosicao = [];
+// Quantidade com a fração que tiver: 70,76 un não pode aparecer como 71.
+const qt = v => (+v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+const temValor = x => x.valor !== null && x.valor !== undefined && x.valor !== '';
+
+/** Totais da foto valorada. O que ficou sem custo é contado à parte, sempre. */
+function totaisPosicao(xs) {
+  const t = { itens: xs.length, qtd: 0, com: 0, qtdCom: 0, valor: 0, sem: 0, qtdSem: 0 };
+  xs.forEach(x => {
+    t.qtd += +x.qtd || 0;
+    if (temValor(x)) { t.com++; t.qtdCom += +x.qtd || 0; t.valor += +x.valor || 0; }
+    else { t.sem++; t.qtdSem += +x.qtd || 0; }
+  });
+  return t;
+}
+
+function resumirPosicao() {
+  const xs = saldo.posicao || [], t = totaisPosicao(xs);
+  const pct = (a, b) => b ? (100 * a / b).toFixed(1).replace('.', ',') + '%' : '—';
+  $('posicao-kpis').innerHTML = [
+    card('Estoque declarado', qt(t.qtd) + ' un', `${n(t.itens)} produtos na foto do ERP`),
+    card('Valor apurado', money(t.valor),
+         t.sem ? `só dos ${n(t.com)} produtos com custo conhecido — parcial`
+               : 'todos os produtos valorados', t.sem ? 'alert' : 'good'),
+    card('Com valor', n(t.com), `${qt(t.qtdCom)} un · ${pct(t.com, t.itens)} dos produtos`),
+    card('Sem valor', n(t.sem),
+         `${qt(t.qtdSem)} un · ${pct(t.qtdSem, t.qtd)} das unidades`, t.sem ? 'alert' : 'good'),
+  ].join('');
+
+  // O total parcial tem de vir com o tamanho do que falta, na mesma tela.
+  const av = $('posicao-aviso');
+  av.hidden = !t.sem;
+  if (t.sem) av.innerHTML = `
+    <div class="lbl">Este valor não é o valor do estoque inteiro</div>
+    <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
+      <b>${money(t.valor)}</b> é quanto valem os <b>${n(t.com)}</b> produtos
+      (${qt(t.qtdCom)} un) para os quais a base tem custo. Os outros
+      <b>${n(t.sem)}</b> produtos (${qt(t.qtdSem)} un) estão na foto do ERP mas
+      <b>nunca tiveram entrada importada aqui</b> — não há custo para aplicar, e
+      eles ficam sem valor em vez de receber um número arbitrado. Para fechar o
+      total: importar as notas de entrada desses produtos, ou tirar do ERP o
+      extrato de movimentos (ele traz o custo médio) da filial.
+    </p>`;
+}
+
+function desenharPosicao() {
+  const f = $('f-posicao').value, q = $('q-posicao').value.trim().toUpperCase();
+  const vistas = (saldo.posicao || []).filter(x =>
+    (!f || (f === 'com') === temValor(x)) &&
+    (!q || `${x.cod_item} ${x.descr_item || ''} ${x.ncm || ''}`.toUpperCase().includes(q)));
+  vistasPosicao = vistas;
+  const t = totaisPosicao(vistas);
+  fill('tbl-posicao', vistas, x => {
+    const dt = x.custo_dt_txt || x.custo_dt;
+    return `
+      <td class="mono"><b>${esc(x.cod_item)}</b></td>
+      <td class="desc" title="${esc(x.descr_item || '')}">${esc((x.descr_item || '—').slice(0, 56))}</td>
+      <td class="mono">${x.ncm ? esc(x.ncm) : '<span class="muted">—</span>'}</td>
+      <td>${esc(x.unid || '—')}</td>
+      <td class="num"><b>${qt(x.qtd)}</b></td>
+      <td class="num">${temValor(x) ? money(x.custo_unit) : '<span class="muted">—</span>'}</td>
+      <td class="num">${temValor(x) ? '<b>' + money(x.valor) + '</b>'
+          : '<span class="muted" title="Sem custo conhecido para este código">sem valor</span>'}</td>
+      <td>${x.custo_fonte ? esc(x.custo_fonte) : '<span class="muted">—</span>'}</td>
+      <td class="mono">${dt ? brDate(dt) : '<span class="muted">—</span>'}</td>`;
+  }, vistas.length ? `<tfoot><tr><td colspan="4">${n(t.itens)} produto(s)` +
+      (t.sem ? ` · ${n(t.sem)} sem valor` : '') + `</td>
+      <td class="num">${qt(t.qtd)}</td><td></td>
+      <td class="num">${money(t.valor)}</td>
+      <td colspan="2">${t.sem ? 'total parcial' : ''}</td></tr></tfoot>` : '');
+}
+
+const COLUNAS_POSICAO = [
+  { campo: 'cod_item', rotulo: 'Código' },
+  { campo: 'descr_item', rotulo: 'Descrição' },
+  { campo: 'ncm', rotulo: 'NCM' },
+  { campo: 'unid', rotulo: 'Unidade', marcada: false },
+  { campo: 'qtd', rotulo: 'Quantidade', tipo: 'numero', soma: true },
+  { campo: 'custo_unit', rotulo: 'Custo unitário', tipo: 'dinheiro' },
+  { campo: 'valor', rotulo: 'Valor', tipo: 'dinheiro', soma: true },
+  { campo: 'custo_fonte', rotulo: 'Origem do custo' },
+  { campo: 'custo_dt_txt', rotulo: 'Data do custo', tipo: 'data', marcada: false },
+];
+
+$('exportar-posicao').onclick = () => {
+  if (!saldo || !saldo.arquivo) return;
+  const a = saldo.arquivo, t = totaisPosicao(vistasPosicao);
+  painelExportar({
+    titulo: `Estoque declarado pelo ERP — ${a.uf || a.deposito || ''} em ${brDate(a.dt)}`,
+    // O aviso de total parcial viaja dentro do arquivo: o relatório circula
+    // sem a tela, e o número não pode chegar sozinho.
+    subtitulo: `${a.deposito || ''} · ${n(t.itens)} produtos, ${qt(t.qtd)} un` +
+      (t.sem ? ` · valor parcial: ${n(t.sem)} produtos (${qt(t.qtdSem)} un) sem custo conhecido`
+             : ' · todos valorados'),
+    aba: 'Estoque declarado',
+    colunas: COLUNAS_POSICAO,
+    linhas: vistasPosicao.map(x => ({ ...x, custo_dt_txt: x.custo_dt_txt || x.custo_dt })),
+  });
+};
+
+$('f-posicao').onchange = desenharPosicao;
+let tqp;
+$('q-posicao').oninput = () => { clearTimeout(tqp); tqp = setTimeout(desenharPosicao, 200); };
+
+$('saldo-abas').querySelectorAll('[data-saldo]').forEach(b => b.onclick = () => {
+  $('saldo-abas').querySelectorAll('[data-saldo]').forEach(x => x.classList.toggle('on', x === b));
+  $('saldo-posicao').hidden = b.dataset.saldo !== 'posicao';
+  $('saldo-confronto').hidden = b.dataset.saldo !== 'confronto';
+});
 
 function desenharSaldo() {
   const f = $('f-saldo').value, q = $('q-saldo').value.trim().toUpperCase();
@@ -567,7 +724,8 @@ function desenharSaldo() {
       <td class="num">${x.exposicao === null || x.exposicao === undefined
           ? '<span class="muted" title="Sem custo nosso: não dá para valorar">sem custo</span>'
           : money(x.exposicao)}</td>
-      <td class="mono">${x.ultima_mov_txt ? brDate(x.ultima_mov_txt)
+      <td class="mono">${x.ultima_mov_txt || x.ultima_mov
+          ? brDate(x.ultima_mov_txt || x.ultima_mov)
           : '<span class="muted">nunca</span>'}</td>
       <td><span class="chip ${cls}">${txt}</span></td>`;
   }, vistas.length ? `<tfoot><tr><td colspan="4">${n(vistas.length)} item(ns)</td>
@@ -605,7 +763,8 @@ $('exportar-saldo').onclick = () => {
     aba: 'Saldo x apuração',
     colunas: COLUNAS_SALDO,
     linhas: vistasSaldo.map(x => ({
-      ...x, situacao_txt: (SIT_SALDO[x.situacao] || [x.situacao])[0] })),
+      ...x, ultima_mov_txt: x.ultima_mov_txt || x.ultima_mov,
+      situacao_txt: (SIT_SALDO[x.situacao] || [x.situacao])[0] })),
   });
 };
 

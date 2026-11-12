@@ -282,9 +282,9 @@ def exportar(body):
         return {"erro": f"são {len(linhas)} linhas; o limite da exportação é "
                         f"{LIMITE_EXPORTACAO}. Filtre antes de exportar."}
     titulo = (b.get("titulo") or "Relatório").strip()[:120]
-    sub = (b.get("subtitulo") or "").strip()[:200]
+    sub = (b.get("subtitulo") or "").strip()[:300]
 
-    dados = (exporta.xlsx(titulo, colunas, linhas, b.get("aba") or "Relatório")
+    dados = (exporta.xlsx(titulo, colunas, linhas, b.get("aba") or "Relatório", sub)
              if formato == "xlsx" else exporta.pdf(titulo, sub, colunas, linhas))
     return {"nome": exporta.nome_arquivo(titulo, formato),
             "tipo": ("application/vnd.openxmlformats-officedocument."
@@ -317,7 +317,7 @@ def erp_saldo(qs):
         ultimo = query("select id from erp_saldo_arquivo "
                        "where vigente order by dt desc, id desc limit 1")
         if not ultimo:
-            return {"arquivo": None, "resumo": None, "itens": []}
+            return {"arquivo": None, "resumo": None, "itens": [], "posicao": []}
         aid = int(ultimo[0]["id"])
     arq = query("select id, nome_arquivo, deposito, cnpj, uf, dt::text dt, linhas, "
                 "itens, quantidade, vigente, problemas "
@@ -330,6 +330,9 @@ def erp_saldo(qs):
         "resumo": resumo[0] if resumo else None,
         "itens": query(f"select *, ultima_mov::text ultima_mov_txt "
                        f"from erp_saldo_confronto({aid})"),
+        # A foto sozinha, valorada: só o que o ERP declara, sem a nossa posição.
+        "posicao": query(f"select *, custo_dt::text custo_dt_txt "
+                         f"from erp_saldo_valorado({aid})"),
     }
 
 

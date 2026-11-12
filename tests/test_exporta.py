@@ -119,3 +119,56 @@ def test_tabela_vazia_ainda_gera_arquivo(tmp_path):
     lidas = list(planilha.linhas(_escreve(tmp_path, linhas=[])))
     assert lidas[3][0] == "Código"
     assert exporta.pdf("Vazio", "", COLUNAS, []).count(b"/Type /Page ") == 1
+
+
+# ------------------------------------------------------------ linha de total
+
+COM_SOMA = [
+    {"campo": "cod_item", "rotulo": "Código"},
+    {"campo": "qtd", "rotulo": "Quantidade", "tipo": "numero", "soma": True},
+    {"campo": "preco", "rotulo": "Custo unitário", "tipo": "dinheiro"},
+    {"campo": "valor", "rotulo": "Valor", "tipo": "dinheiro", "soma": True},
+]
+VALORADAS = [
+    {"cod_item": "3901", "qtd": "29", "preco": "1951.75", "valor": "56600.75"},
+    {"cod_item": "5275", "qtd": "1675", "preco": None, "valor": None},   # sem custo
+    {"cod_item": "5020", "qtd": "70.76", "preco": "10", "valor": "707.60"},
+]
+
+
+def test_total_soma_so_as_colunas_pedidas_e_ignora_vazio():
+    t = exporta.totais(COM_SOMA, VALORADAS)
+    # Custo unitário não se soma: não está marcado, e somá-lo não significa nada.
+    assert set(t) == {"qtd", "valor"}
+    assert t["qtd"] == 1774.76
+    assert t["valor"] == 57308.35          # o item sem custo não entra como zero à parte
+
+
+def test_planilha_ganha_total_com_formula(tmp_path):
+    caminho = tmp_path / "t.xlsx"
+    caminho.write_bytes(exporta.xlsx("Estoque", COM_SOMA, VALORADAS,
+                                     subtitulo="DEP MCI SC · valor parcial"))
+    lidas = list(planilha.linhas(str(caminho)))
+    assert lidas[2][0] == "DEP MCI SC · valor parcial"     # subtítulo na linha 3
+    assert lidas[3][0] == "Código"                         # cabeçalho não saiu do lugar
+    assert lidas[7][0] == "Total"
+    assert float(lidas[7][1]) == 1774.76 and float(lidas[7][3]) == 57308.35
+    assert lidas[7][2] == ""                               # custo unitário sem total
+    with zipfile.ZipFile(str(caminho)) as z:
+        sheet = z.read("xl/worksheets/sheet1.xml").decode()
+    # Fórmula sobre as linhas de dados (5 a 7), e não número colado.
+    assert "<f>SUM(B5:B7)</f>" in sheet and "<f>SUM(D5:D7)</f>" in sheet
+
+
+def test_sem_coluna_de_soma_nao_aparece_total(tmp_path):
+    lidas = list(planilha.linhas(_escreve(tmp_path)))
+    assert len(lidas) == 6 and all(l[:1] != ["Total"] for l in lidas)
+
+
+def test_pdf_ganha_total_em_negrito():
+    pdf = exporta.pdf("Estoque", "sub", COM_SOMA, VALORADAS)
+    assert b"/F2 7.5 Tf" in pdf                 # corpo da tabela em negrito: só o total
+    assert b"(Total) Tj" in pdf
+    assert b"(57.308,35) Tj" in pdf and b"(1.774,76) Tj" in pdf
+    # O rodapé conta as linhas de dados, não o total.
+    assert rb"3 linha\(s\)" in pdf

@@ -364,8 +364,9 @@ function painelExportar(spec) {
       const r = await apiPost('/api/exportar', {
         formato, titulo: spec.titulo || 'Relatório', subtitulo: spec.subtitulo || '',
         aba: spec.aba || 'Relatório',
+        // 'soma' pede a linha de total no fim do arquivo para aquela coluna.
         colunas: escolhidas.map(c => ({ campo: c.campo, rotulo: c.rotulo || c.campo,
-                                        tipo: c.tipo || 'texto' })),
+                                        tipo: c.tipo || 'texto', soma: !!c.soma })),
         // Só os campos escolhidos sobem: não há razão para mandar o resto.
         linhas: linhas.map(l => Object.fromEntries(
           escolhidas.map(c => [c.campo, l[c.campo]]))),

@@ -212,7 +212,7 @@ def rota_erp_saldo(qs):
         ultimo = consulta_rest("erp_saldo_arquivo", {
             "vigente": "is.true", "order": "dt.desc,id.desc", "limit": 1, "select": "id"})
         if not ultimo:
-            return {"arquivo": None, "resumo": None, "itens": []}
+            return {"arquivo": None, "resumo": None, "itens": [], "posicao": []}
         aid = int(ultimo[0]["id"])
     arq = consulta_rest("erp_saldo_arquivo", {"id": f"eq.{aid}"})
     if not arq:
@@ -220,7 +220,9 @@ def rota_erp_saldo(qs):
     resumo = consulta_rest("rpc/erp_saldo_resumo", {"p_arquivo_id": aid})
     return {"arquivo": arq[0],
             "resumo": resumo[0] if resumo else None,
-            "itens": consulta_rest("rpc/erp_saldo_confronto", {"p_arquivo_id": aid})}
+            "itens": consulta_rest("rpc/erp_saldo_confronto", {"p_arquivo_id": aid}),
+            # A foto sozinha, valorada: só o que o ERP declara.
+            "posicao": consulta_rest("rpc/erp_saldo_valorado", {"p_arquivo_id": aid})}
 
 
 def rota_cfop_detalhe(qs, funcao):
@@ -561,8 +563,8 @@ def post_exportar(corpo, u):
         raise Erro(f"são {len(linhas)} linhas; o limite da exportação é "
                    f"{LIMITE_EXPORTACAO}. Filtre antes de exportar.")
     titulo = (b.get("titulo") or "Relatório").strip()[:120]
-    sub = (b.get("subtitulo") or "").strip()[:200]
-    dados = (exporta.xlsx(titulo, colunas, linhas, b.get("aba") or "Relatório")
+    sub = (b.get("subtitulo") or "").strip()[:300]
+    dados = (exporta.xlsx(titulo, colunas, linhas, b.get("aba") or "Relatório", sub)
              if formato == "xlsx" else exporta.pdf(titulo, sub, colunas, linhas))
     return {"nome": exporta.nome_arquivo(titulo, formato),
             "tipo": ("application/vnd.openxmlformats-officedocument."
