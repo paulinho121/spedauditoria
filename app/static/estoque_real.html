@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estoque real — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.abas { display: flex; gap: 4px; margin: 20px 0 0; flex-wrap: wrap; }
+.abas button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.abas button .qt { opacity: .75; font-weight: 400; margin-left: 6px; }
+.filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+.filtros label { font-size: 12px; color: var(--on-surface-variant); display: flex;
+                 align-items: center; gap: 6px; }
+.filtros input[type=date] { padding: 6px 8px; }
+.filtros input[type=number] { width: 86px; }
+.filtros [hidden] { display: none !important; }
+th.ord { cursor: pointer; user-select: none; white-space: nowrap; }
+th.ord:hover { color: var(--primary); }
+th.ord .seta { font-size: 10px; opacity: .8; margin-left: 3px; }
+tr.clic { cursor: pointer; }
+tr.clic:hover td { background: var(--surface-low); }
+td.neg, b.neg { color: var(--error); font-weight: 700; }
+td.pos { font-weight: 700; }
+tr.linha-neg td { background: var(--error-container); }
+tr.alvo td { outline: 2px solid var(--primary); outline-offset: -2px; }
+.resumo-filtro { font-size: 12.5px; color: var(--on-surface-variant); margin: 0 0 8px; }
+.mais { margin: 12px 0 24px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Estoque real e notas que faltam, pelo Kardex do ERP</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Reconstrução</a>
+    <a href="/mes">Mês</a>
+    <a href="/apuracao">Apuração</a>
+    <a href="/resultado">Resultado</a>
+    <a href="/importar">Importar</a>
+    <a href="/erp">ERP</a>
+    <a class="on" href="/estoque-real">Estoque real</a>
+    <a href="/achados">Achados</a>
+    <a href="/relatorio">Relatório</a>
+    <a href="/manual">Manual</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
+    <div class="lbl">O que esta tela responde</div>
+    <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
+      Ela lê o <b>extrato de movimentos do ERP</b> (o Kardex do depósito, nota a
+      nota) e responde três perguntas: <b>quais notas precisam de uma entrada</b>
+      — saíram sem o depósito ter saldo; <b>quais precisam de uma saída</b> —
+      retornaram de um terceiro sem terem sido remetidas; e <b>qual é o estoque
+      real</b> — o saldo do depósito mais o que está em poder de terceiros.
+      Nada aqui usa os XML: é o ERP conferido contra ele mesmo. O extrato é
+      enviado na aba <a href="/erp">ERP</a> ou na <a href="/importar">Importar</a>.
+    </p>
+  </div>
+
+  <div class="controls">
+    <select id="arquivo"><option>carregando…</option></select>
+    <span class="muted" id="arq-info"></span>
+  </div>
+
+  <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
+
+  <div id="aviso" hidden class="card alert" style="margin:16px 0 0"></div>
+
+  <div class="abas" id="abas">
+    <button data-aba="produtos" class="on">Estoque real por produto</button>
+    <button data-aba="sem_estoque">Precisa de ENTRADA</button>
+    <button data-aba="sem_remessa">Precisa de SAÍDA</button>
+    <button data-aba="terceiros">Em poder de terceiros</button>
+    <button data-aba="inconsistencias">Erros do extrato</button>
+    <button id="exportar" style="margin-left:auto">Exportar ↓</button>
+  </div>
+
+  <p class="muted" id="explica" style="font-size:13px;margin:12px 0 0;line-height:1.6"></p>
+
+  <div class="filtros" id="filtros">
+    <input type="search" id="q" placeholder="Código, produto, nota ou cliente…"
+           autocomplete="off" style="min-width:250px">
+    <select id="f-sit"></select>
+    <label data-f="periodo">de <input type="date" id="f-de"></label>
+    <label data-f="periodo">até <input type="date" id="f-ate"></label>
+    <div class="multi" id="m-nat" data-f="natureza">
+      <button type="button" id="m-nat-btn">Todas as naturezas</button>
+      <div class="multi-lista" id="m-nat-lista" hidden></div>
+    </div>
+    <div class="multi" id="m-tipo" data-f="tipo">
+      <button type="button" id="m-tipo-btn">Todos os tipos de operação</button>
+      <div class="multi-lista" id="m-tipo-lista" hidden></div>
+    </div>
+    <input type="search" id="f-ent" data-f="entidade" list="lista-ent"
+           placeholder="Cliente / terceiro…" autocomplete="off" style="min-width:200px">
+    <datalist id="lista-ent"></datalist>
+    <select id="f-prazo" data-f="prazo"></select>
+    <select id="f-cura" data-f="cura"></select>
+    <label data-f="min">qtd. mín. <input type="number" id="f-min" min="0" step="1"></label>
+    <label data-f="agrupar"><input type="checkbox" id="f-agrupar" checked> uma linha por nota</label>
+    <label data-f="so_estoque"><input type="checkbox" id="f-so-estoque"> só com estoque real</label>
+    <button type="button" id="limpar">Limpar filtros</button>
+  </div>
+
+  <p class="resumo-filtro" id="resumo-filtro"></p>
+
+  <div class="wrap">
+    <table id="tbl">
+      <thead><tr><th>—</th></tr></thead>
+      <tbody><tr><td class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="mais"><button type="button" id="mais" hidden>Mostrar mais linhas</button></div>
+</main>
+
+<script src="/app.js"></script>
+<script>ligarSair(); ligarTrabalhos();</script>
+<script>
+const $ = id => document.getElementById(id);
+const LOTE = 300;                 // linhas desenhadas por vez; o filtro vale para todas
+
+function card(lbl, val, foot, cls) {
+  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+          <div class="val sm">${val}</div><div class="foot">${foot || ''}</div></div>`;
+}
+// Quantidade com a fração que tiver: 70,76 un não pode aparecer como 71.
+const qt = v => (+v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+const vazio = '<span class="muted">—</span>';
+
+const NATUREZA = {
+  armazem: 'Armazém / depósito fechado', locacao: 'Locação', comodato: 'Comodato',
+  demonstracao: 'Demonstração', exposicao: 'Exposição', conserto: 'Conserto',
+  garantia: 'Garantia', compra: 'Compra / importação', venda: 'Venda',
+  transferencia: 'Transferência', brinde: 'Brinde', devolucao: 'Devolução',
+  producao: 'Req. de produção', ajuste: 'Ajuste / correção', outros: 'Outros',
+};
+const nat = k => NATUREZA[k] || k || '—';
+
+const SIT_PRODUTO = {
+  ok: ['fecha', 'ok'],
+  ficou_negativo: ['já ficou negativo', 'warn'],
+  retorno_sem_remessa: ['voltou sem ter ido', 'warn'],
+  negativo_hoje: ['depósito negativo', 'err'],
+  falta_entrada: ['falta entrada', 'err'],
+};
+const SIT_NOTA = { aberta: ['em aberto', 'err'], coberta: ['coberta depois', 'warn'] };
+const PROBLEMA = {
+  saldo_nao_fecha: ['saldo não fecha', 'err'],
+  quantidade_fracionada: ['quantidade fracionada', 'warn'],
+};
+const chip = (mapa, k) => {
+  const [txt, cls] = mapa[k] || [k || '—', ''];
+  return `<span class="chip ${cls}">${esc(txt)}</span>`;
+};
+
+/* ------------------------------------------------------------------ as abas
+   Cada aba diz de onde vêm as linhas, que filtros valem nela e que colunas
+   mostra. 'porNota' é a mesma lista vista com uma linha por documento.       */
+const num = (campo, rotulo, extra) => ({ campo, rotulo, tipo: 'numero', ...extra });
+const ABAS = {
+  produtos: {
+    rota: '/api/real/produtos',
+    filtros: ['natureza_onde', 'min', 'so_estoque'],
+    situacoes: [['', 'Todas as situações'], ['problema', 'Só com problema'],
+                ['negativo_hoje', 'Depósito negativo hoje'],
+                ['falta_entrada', 'Falta entrada (nem com terceiros fecha)'],
+                ['retorno_sem_remessa', 'Voltou de terceiro sem ter ido'],
+                ['ficou_negativo', 'Já ficou negativo no período'],
+                ['repetido', 'Código em mais de um cadastro'], ['ok', 'Fecha']],
+    ordem: ['valor_real', -1],
+    explica: `<b>Estoque real</b> = saldo do depósito no ERP + o que está em poder
+      de terceiros, sem deixar negativo. <b>Em terceiros</b> é, por terceiro, o
+      que foi menos o que voltou — só quando sobra. <b>Voltou a mais</b> é o
+      contrário: retornou sem ter sido remetido. <b>Falta entrada</b> aparece
+      quando nem somando terceiros a conta fecha: saiu mais do que entrou.
+      <b>Valor</b> é o estoque real pelo custo da última compra do produto no
+      extrato. Clique num produto para ver o Kardex dele.`,
+    colunas: [
+      { campo: 'cod_item', rotulo: 'Código', mono: true },
+      { campo: 'descr_item', rotulo: 'Produto', desc: true },
+      { campo: 'ncm', rotulo: 'NCM', mono: true, exp: false },
+      num('saldo_erp', 'Saldo ERP', { soma: true, sinal: true }),
+      num('em_armazem', 'Armazém', { soma: true, zero: true }),
+      num('em_locacao', 'Locação', { soma: true, zero: true }),
+      num('em_comodato', 'Comodato', { soma: true, zero: true }),
+      num('em_demonstracao', 'Demonstr.', { soma: true, zero: true, exp: false }),
+      num('em_outros', 'Outros', { soma: true, zero: true, exp: false }),
+      num('em_terceiros', 'Em terceiros', { soma: true, zero: true }),
+      num('retorno_sem_remessa', 'Voltou a mais', { soma: true, zero: true }),
+      num('falta_entrada', 'Falta entrada', { soma: true, zero: true, alerta: true }),
+      num('estoque_real', 'Estoque real', { soma: true, forte: true }),
+      { campo: 'custo', rotulo: 'Custo últ. compra', tipo: 'dinheiro' },
+      { campo: 'custo_origem', rotulo: 'Origem do custo', oculta: true, exp: false },
+      { campo: 'custo_erp', rotulo: 'Custo médio no ERP', tipo: 'dinheiro', oculta: true, exp: false },
+      num('saldo_foto', 'Saldo na foto do ERP', { oculta: true, exp: false }),
+      num('entradas', 'Entradas no período', { oculta: true, exp: false }),
+      num('saidas', 'Saídas no período', { oculta: true, exp: false }),
+      { campo: 'valor_real', rotulo: 'Valor', tipo: 'dinheiro', soma: true },
+      num('menor_saldo', 'Pior saldo', { sinal: true, exp: false }),
+      { campo: 'situacao', rotulo: 'Situação', chip: SIT_PRODUTO },
+    ],
+  },
+  sem_estoque: {
+    rota: '/api/real/sem-estoque', nota: true,
+    filtros: ['periodo', 'natureza', 'tipo', 'entidade', 'prazo', 'cura', 'min', 'agrupar'],
+    situacoes: [['', 'Abertas e cobertas'], ['aberta', 'Em aberto — a entrada não existe'],
+                ['coberta', 'Coberta depois — a entrada veio atrasada']],
+    prazos: [['', 'Qualquer atraso'], ['0', 'Coberta no mesmo dia'], ['1-7', '1 a 7 dias'],
+             ['8-30', '8 a 30 dias'], ['31-90', '31 a 90 dias'], ['91-', 'Mais de 90 dias']],
+    ordem: ['dt', 1],
+    explica: `Cada linha é uma <b>nota de saída emitida com o depósito sem
+      saldo</b>. Ela precisa de uma <b>nota de entrada antes dela</b>.
+      <b>Coberta depois</b>: a entrada veio — a coluna diz qual e quantos dias
+      depois; o estoque fechou, mas os documentos estão fora de ordem.
+      <b>Em aberto</b>: a entrada ainda não existe, e é o que falta lançar.
+      Quando a cobertura é um <i>retorno de armazém</i>, a mercadoria estava no
+      terceiro e saiu de lá sem a nota de retorno ter sido emitida a tempo.`,
+    qtd: 'descoberto',
+    colunas: [
+      { campo: 'dt', rotulo: 'Data', tipo: 'data' },
+      { campo: 'doc_texto', rotulo: 'Nota de saída', mono: true },
+      { campo: 'tipo', rotulo: 'Operação' },
+      { campo: 'entidade', rotulo: 'Destinatário' },
+      { campo: 'cod_item', rotulo: 'Código', mono: true, item: true },
+      { campo: 'descr_item', rotulo: 'Produto', desc: true, item: true },
+      num('itens', 'Itens', { soma: true, grupo: true }),
+      num('qtd', 'Qtd. saída', { soma: true }),
+      num('descoberto', 'Sem estoque', { soma: true, alerta: true }),
+      num('saldo_depois', 'Saldo depois', { sinal: true, item: true }),
+      { campo: 'situacao', rotulo: 'Situação', chip: SIT_NOTA },
+      { campo: 'coberta_em', rotulo: 'Coberta em', tipo: 'data' },
+      { campo: 'coberta_doc', rotulo: 'Entrada que cobriu', mono: true },
+      { campo: 'coberta_tipo', rotulo: 'Tipo da entrada', exp: false },
+      num('dias', 'Dias', {}),
+    ],
+  },
+  sem_remessa: {
+    rota: '/api/real/sem-remessa', nota: true,
+    filtros: ['periodo', 'natureza', 'tipo', 'entidade', 'min', 'agrupar'],
+    situacoes: [['', 'Abertas e cobertas'], ['aberta', 'Em aberto — a remessa não existe'],
+                ['coberta', 'Coberta depois — a remessa veio atrasada']],
+    ordem: ['dt', 1],
+    explica: `Cada linha é uma <b>entrada de retorno de um terceiro que devolveu
+      mais do que recebeu</b> (armazém, locação, comodato…). Ela precisa de uma
+      <b>nota de saída — a remessa — antes dela</b>. Quando a remessa é anterior
+      ao início do extrato, o que falta é o <b>saldo inicial</b> que estava com
+      aquele terceiro. <b>Em aberto</b>: até hoje o terceiro devolveu mais do que
+      recebeu.`,
+    qtd: 'sem_lastro',
+    colunas: [
+      { campo: 'dt', rotulo: 'Data', tipo: 'data' },
+      { campo: 'doc_texto', rotulo: 'Nota de retorno', mono: true },
+      { campo: 'natureza', rotulo: 'Natureza', nat: true },
+      { campo: 'tipo', rotulo: 'Operação', exp: false },
+      { campo: 'entidade', rotulo: 'Terceiro' },
+      { campo: 'cod_item', rotulo: 'Código', mono: true, item: true },
+      { campo: 'descr_item', rotulo: 'Produto', desc: true, item: true },
+      num('itens', 'Itens', { soma: true, grupo: true }),
+      num('qtd', 'Qtd. retorno', { soma: true }),
+      num('sem_lastro', 'Sem remessa', { soma: true, alerta: true }),
+      { campo: 'situacao', rotulo: 'Situação', chip: SIT_NOTA },
+      { campo: 'coberta_em', rotulo: 'Coberta em', tipo: 'data' },
+      { campo: 'coberta_doc', rotulo: 'Remessa que cobriu', mono: true },
+      num('dias', 'Dias', {}),
+    ],
+  },
+  terceiros: {
+    rota: '/api/real/terceiros', nota: true,
+    filtros: ['periodo', 'natureza', 'tipo', 'entidade', 'prazo', 'min', 'agrupar'],
+    situacoes: null,
+    prazos: [['', 'Fora há qualquer tempo'], ['0-30', 'Até 30 dias'], ['31-90', '31 a 90 dias'],
+             ['91-180', '91 a 180 dias'], ['181-365', '181 a 365 dias'],
+             ['366-', 'Mais de um ano']],
+    ordem: ['dias', -1],
+    explica: `<b>Remessas que ainda não voltaram</b> — o que está em poder de
+      terceiros, nota a nota. Os retornos quitam as remessas mais antigas
+      primeiro; <b>pendente</b> é o que sobrou de cada nota. Não é erro por si.
+      Vira erro quando a mercadoria já voltou, ou já foi vendida de lá, e
+      ninguém emitiu a <b>nota de entrada de retorno</b>: é para isso que serve a
+      coluna de dias.`,
+    qtd: 'pendente',
+    colunas: [
+      { campo: 'dt', rotulo: 'Data', tipo: 'data' },
+      { campo: 'doc_texto', rotulo: 'Nota de remessa', mono: true },
+      { campo: 'natureza', rotulo: 'Natureza', nat: true },
+      { campo: 'tipo', rotulo: 'Operação', exp: false },
+      { campo: 'entidade', rotulo: 'Com quem está' },
+      { campo: 'cod_item', rotulo: 'Código', mono: true, item: true },
+      { campo: 'descr_item', rotulo: 'Produto', desc: true, item: true },
+      num('itens', 'Itens', { soma: true, grupo: true }),
+      num('qtd', 'Qtd. remetida', { soma: true }),
+      num('pendente', 'Pendente', { soma: true, forte: true }),
+      num('dias', 'Dias fora', {}),
+    ],
+  },
+  inconsistencias: {
+    rota: '/api/real/inconsistencias',
+    filtros: ['periodo'],
+    situacoes: [['', 'Todos os problemas'], ['saldo_nao_fecha', 'Saldo impresso não fecha'],
+                ['quantidade_fracionada', 'Quantidade fracionada']],
+    campoSit: 'problema',
+    ordem: ['dt', 1],
+    explica: `O que o próprio extrato tem de errado, antes de qualquer conclusão:
+      linhas em que o saldo que o ERP imprime não é o anterior mais a entrada
+      menos a saída, e quantidades com fração em produto vendido por unidade
+      (valor digitado no campo de quantidade). Onde o saldo impresso não fecha,
+      esta tela usa o saldo <b>recalculado</b>.`,
+    colunas: [
+      { campo: 'dt', rotulo: 'Data', tipo: 'data' },
+      { campo: 'doc_texto', rotulo: 'Documento', mono: true },
+      { campo: 'tipo', rotulo: 'Operação' },
+      { campo: 'entidade', rotulo: 'Entidade' },
+      { campo: 'cod_item', rotulo: 'Código', mono: true },
+      { campo: 'descr_item', rotulo: 'Produto', desc: true },
+      num('ent', 'Entrada', { zero: true }),
+      num('sai', 'Saída', { zero: true }),
+      num('saldo_impresso', 'Saldo impresso', { sinal: true }),
+      num('saldo_calculado', 'Saldo recalculado', { sinal: true }),
+      { campo: 'problema', rotulo: 'Problema', chip: PROBLEMA },
+      { campo: 'detalhe', rotulo: 'Detalhe' },
+    ],
+  },
+};
+
+/* -------------------------------------------------------------------- estado */
+let arquivoId = null, resumo = null, aba = 'produtos';
+const dados = {};                        // aba -> linhas (carregadas ao abrir)
+const ordem = {};                        // aba -> [campo, direção]
+let vistas = [], colunasVistas = [], colunasExport = [], mostradas = LOTE;
+const marcados = { nat: new Set(), tipo: new Set() };   // vazio = todos
+
+/* ------------------------------------------------------------------- resumo */
+async function carregar(id) {
+  let r;
+  try { r = await api('/api/real' + (id ? '?id=' + encodeURIComponent(id) : '')); }
+  catch (e) { return falha(e); }
+  const arqs = r.arquivos || [];
+  if (!arqs.length || !r.arquivo) {
+    $('arquivo').innerHTML = '<option>nenhum extrato importado</option>';
+    $('kpis').innerHTML = `<div class="skel">Envie o extrato de movimentos do ERP
+      na aba ERP para começar.</div>`;
+    $('tbl').querySelector('tbody').innerHTML = '<tr><td class="skel">—</td></tr>';
+    return;
+  }
+  const a = r.arquivo;
+  arquivoId = a.id; resumo = r.resumo || {};
+  $('arquivo').innerHTML = arqs.map(x => `<option value="${x.id}"${+x.id === +a.id ? ' selected' : ''}>
+      ${esc(x.deposito || '?')} · ${brDate(x.dt_ini)} a ${brDate(x.dt_fin)} ·
+      ${n(x.linhas)} movimentos${x.vigente ? '' : ' (substituído)'}</option>`).join('');
+  $('arq-info').textContent = `${a.nome_arquivo} · movimentos de ` +
+    `${brDate(resumo.primeira)} a ${brDate(resumo.ultima)}` + (a.uf ? ` · filial ${a.uf}` : '');
+
+  const s = resumo;
+  $('kpis').innerHTML = [
+    card('Estoque real', qt(s.estoque_real) + ' un',
+         `${money(s.valor_real)} pelo custo da última compra · ${n(s.produtos)} produtos`),
+    card('Saldo no ERP (depósito)', qt(s.saldo_erp) + ' un',
+         +s.negativos_hoje ? `${n(s.negativos_hoje)} produtos negativos hoje (−${qt(s.qtd_negativa_hoje)} un)`
+                           : 'nenhum produto negativo', +s.negativos_hoje ? 'alert' : ''),
+    card('Em poder de terceiros', qt(s.em_terceiros) + ' un',
+         `armazém ${qt(s.em_armazem)} · locação ${qt(s.em_locacao)} · comodato ` +
+         `${qt(s.em_comodato)} · outros ${qt(+s.em_demonstracao + +s.em_outros)}`),
+    card('Precisa de ENTRADA', n(s.sem_estoque_notas) + ' notas',
+         `saída sem estoque · <b>${n(s.sem_estoque_abertas_notas)} ainda em aberto</b> ` +
+         `(${qt(s.sem_estoque_abertas_qtd)} un)`, +s.sem_estoque_notas ? 'alert' : 'good'),
+    card('Precisa de SAÍDA', n(s.sem_remessa_notas) + ' notas',
+         `retorno sem remessa · <b>${n(s.sem_remessa_abertas_notas)} em aberto</b> · ` +
+         `${qt(s.retorno_sem_remessa)} un voltaram a mais`, +s.sem_remessa_notas ? 'alert' : 'good'),
+    card('Falta entrada', qt(s.falta_entrada) + ' un',
+         +s.produtos_falta_entrada ? `${n(s.produtos_falta_entrada)} produtos: nem com terceiros o estoque fecha`
+                                   : 'todo produto fecha', +s.falta_entrada ? 'alert' : 'good'),
+  ].join('');
+
+  // Dois fatos do extrato que mudam a leitura de tudo o que vem abaixo.
+  const av = [];
+  if (!+a.aberturas) av.push(`<b>O extrato começa em ${brDate(s.primeira)} sem saldo
+    inicial</b>: todo produto parte do zero. O que já existia antes — no depósito
+    ou em armazém — nunca foi lançado, e é por isso que tanta mercadoria
+    “volta” de terceiros sem ter sido remetida e tanta nota sai sem saldo.`);
+  if (+s.saidas_custo_zero) av.push(`<b>${n(s.saidas_custo_zero)} das ${n(s.saidas)}
+    saídas vêm com custo zero</b>` + (+s.vendas && +s.vendas_custo_zero === +s.vendas
+      ? ` — entre elas, todas as ${n(s.vendas)} linhas de venda` : '') + `. Saída sem
+    custo não baixa o custo do saldo, e o custo médio seguinte sai inflado
+    (${n(s.saldo_zero_com_custo)} linhas com saldo zero e custo sobrando;
+    ${n(s.custo_medio_negativo)} com custo médio negativo). Por isso o valor
+    desta tela usa o <b>custo unitário da última compra</b> de cada produto
+    (sem compra no extrato, o do último retorno de armazém), e não o custo médio
+    do ERP.`);
+  if (+s.inconsistencias) av.push(`${n(s.inconsistencias)} linhas do extrato têm
+    erro próprio (saldo impresso que não fecha ou quantidade fracionada) — veja
+    a aba <i>Erros do extrato</i>.`);
+  $('aviso').hidden = !av.length;
+  $('aviso').innerHTML = `<div class="lbl">Antes de ler os números</div>` +
+    av.map(t => `<p style="margin:8px 0 0;font-size:14px;line-height:1.6">${t}</p>`).join('');
+
+  const qtd = { produtos: s.produtos, sem_estoque: s.sem_estoque_notas,
+                sem_remessa: s.sem_remessa_notas, terceiros: s.em_terceiros_notas,
+                inconsistencias: s.inconsistencias };
+  $('abas').querySelectorAll('[data-aba]').forEach(b => {
+    const base = b.textContent.replace(/\s*\(.*\)$/, '');
+    b.innerHTML = `${esc(base)}<span class="qt">(${n(qtd[b.dataset.aba] || 0)})</span>`;
+  });
+
+  Object.keys(dados).forEach(k => delete dados[k]);
+  abrirAba(aba);
+}
+
+/* ---------------------------------------------------------------- uma aba */
+async function abrirAba(qual) {
+  aba = qual;
+  const def = ABAS[aba];
+  $('abas').querySelectorAll('[data-aba]').forEach(b => b.classList.toggle('on', b.dataset.aba === aba));
+  $('explica').innerHTML = def.explica;
+
+  // Só aparecem os filtros que fazem sentido na aba.
+  $('filtros').querySelectorAll('[data-f]').forEach(el => {
+    const f = el.dataset.f;
+    el.hidden = !(def.filtros.includes(f) ||
+                  (f === 'natureza' && def.filtros.includes('natureza_onde')));
+  });
+  $('f-sit').hidden = !def.situacoes;
+  if (def.situacoes) $('f-sit').innerHTML = def.situacoes.map(
+    ([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('');
+  $('f-prazo').innerHTML = (def.prazos || []).map(
+    ([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('');
+  marcados.nat.clear(); marcados.tipo.clear();
+  if (!ordem[aba]) ordem[aba] = def.ordem.slice();
+
+  if (!dados[aba]) {
+    $('tbl').querySelector('tbody').innerHTML = '<tr><td class="skel">carregando…</td></tr>';
+    try { dados[aba] = await api(def.rota + '?id=' + encodeURIComponent(arquivoId)); }
+    catch (e) { return falha(e); }
+    if (aba !== qual) return;            // trocou de aba enquanto carregava
+  }
+  montarListas();
+  desenhar(true);
+}
+
+/** As opções dos filtros de marcar saem das linhas da própria aba. */
+function montarListas() {
+  const xs = dados[aba] || [], def = ABAS[aba];
+  const conta = campo => {
+    const m = new Map();
+    xs.forEach(x => { if (x[campo]) m.set(x[campo], (m.get(x[campo]) || 0) + 1); });
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  };
+  const lista = (id, itens, rot) => {
+    $(id).innerHTML = `<div class="multi-acoes">
+        <button type="button" data-tudo="1">Todos</button></div>` +
+      itens.map(([v, q]) => `<label><input type="checkbox" value="${esc(v)}">
+        <span>${esc(rot(v))}</span><span class="muted" style="margin-left:auto">${n(q)}</span></label>`).join('');
+  };
+  if (def.filtros.includes('natureza_onde')) {
+    // No produto, a natureza filtra ONDE há saldo em terceiros.
+    const onde = [['armazem', 'em_armazem'], ['locacao', 'em_locacao'], ['comodato', 'em_comodato'],
+                  ['demonstracao', 'em_demonstracao'], ['outros', 'em_outros']];
+    lista('m-nat-lista', onde.map(([k, c]) => [k, xs.filter(x => +x[c] > 0).length]),
+          k => 'Tem saldo em: ' + (k === 'outros' ? 'exposição, conserto, garantia' : nat(k)));
+  } else {
+    lista('m-nat-lista', conta('natureza'), nat);
+  }
+  lista('m-tipo-lista', conta('tipo'), v => v);
+  $('lista-ent').innerHTML = conta('entidade').slice(0, 400).map(
+    ([v]) => `<option value="${esc(v)}">`).join('');
+  $('f-cura').innerHTML = '<option value="">Coberta por qualquer entrada</option>' +
+    conta('coberta_natureza').map(([v, q]) =>
+      `<option value="${esc(v)}">Coberta por: ${esc(nat(v))} (${n(q)})</option>`).join('');
+  rotulosMulti();
+}
+
+function rotulosMulti() {
+  const r = (set, todos, um) => !set.size ? todos : set.size === 1 ? um([...set][0])
+                              : `${set.size} marcados`;
+  $('m-nat-btn').textContent = r(marcados.nat, 'Todas as naturezas', nat);
+  $('m-tipo-btn').textContent = r(marcados.tipo, 'Todos os tipos de operação', v => v);
+}
+
+/* ------------------------------------------------------------------ filtros */
+function noPrazo(dias, faixa) {
+  if (!faixa) return true;
+  if (dias === null || dias === undefined || dias === '') return false;
+  const [de, ate] = faixa.includes('-') ? faixa.split('-') : [faixa, faixa];
+  return +dias >= +de && (ate === '' || +dias <= +ate);
+}
+
+function filtrar() {
+  const def = ABAS[aba], xs = dados[aba] || [];
+  const q = $('q').value.trim().toUpperCase(), sit = $('f-sit').value;
+  const de = $('f-de').value, ate = $('f-ate').value, ent = $('f-ent').value.trim().toUpperCase();
+  const prazo = $('f-prazo').value, cura = $('f-cura').value, min = +$('f-min').value || 0;
+  const tem = f => def.filtros.includes(f);
+  const campoSit = def.campoSit || 'situacao';
+  const ONDE = { armazem: 'em_armazem', locacao: 'em_locacao', comodato: 'em_comodato',
+                 demonstracao: 'em_demonstracao', outros: 'em_outros' };
+  return xs.filter(x => {
+    if (q && !`${x.cod_item} ${x.descr_item || ''} ${x.doc_texto || ''} ${x.entidade || ''} ${x.ncm || ''} ${x.coberta_doc || ''}`
+              .toUpperCase().includes(q)) return false;
+    if (sit && def.situacoes) {
+      if (sit === 'problema') { if (x.situacao === 'ok') return false; }
+      else if (sit === 'repetido') { if (!(+x.cadastros > 1)) return false; }
+      else if (x[campoSit] !== sit) return false;
+    }
+    if (tem('periodo') && ((de && x.dt < de) || (ate && x.dt > ate))) return false;
+    if (tem('natureza') && marcados.nat.size && !marcados.nat.has(x.natureza)) return false;
+    if (tem('natureza_onde') && marcados.nat.size &&
+        ![...marcados.nat].some(k => +x[ONDE[k]] > 0)) return false;
+    if (tem('tipo') && marcados.tipo.size && !marcados.tipo.has(x.tipo)) return false;
+    if (tem('entidade') && ent && !(x.entidade || '').toUpperCase().includes(ent)) return false;
+    if (tem('prazo') && !noPrazo(x.dias, prazo)) return false;
+    if (tem('cura') && cura && x.coberta_natureza !== cura) return false;
+    if (tem('min') && min && Math.abs(+x[def.qtd || 'estoque_real'] || 0) < min) return false;
+    if (tem('so_estoque') && $('f-so-estoque').checked && !(+x.estoque_real > 0)) return false;
+    return true;
+  });
+}
+
+/** Uma linha por documento: os itens da nota somados, a pior situação vence. */
+function porNota(xs, def) {
+  const m = new Map();
+  xs.forEach(x => {
+    const k = `${x.doc_texto}|${x.dt}|${x.entidade}|${x.tipo}`;
+    let g = m.get(k);
+    if (!g) {
+      g = { ...x, itens: 0, qtd: 0, [def.qtd]: 0, dias: null, linhas: [],
+            cod_item: '', descr_item: '', coberta_em: null, coberta_doc: null, coberta_tipo: null };
+      m.set(k, g);
+    }
+    g.itens++; g.linhas.push(x);
+    g.qtd += +x.qtd || 0; g[def.qtd] += +x[def.qtd] || 0;
+    if (x.situacao === 'aberta') g.situacao = 'aberta';
+    if (x.dias !== null && x.dias !== undefined && (g.dias === null || +x.dias > +g.dias)) g.dias = x.dias;
+    if (x.coberta_em && (!g.coberta_em || x.coberta_em > g.coberta_em)) {
+      g.coberta_em = x.coberta_em; g.coberta_doc = x.coberta_doc; g.coberta_tipo = x.coberta_tipo;
+    }
+  });
+  // Nota com item ainda aberto não tem data de cobertura: ela não está coberta.
+  m.forEach(g => { if (g.situacao === 'aberta') { g.coberta_em = g.coberta_doc = g.coberta_tipo = null; g.dias = null; } });
+  return [...m.values()];
+}
+
+/* ------------------------------------------------------------------ desenho */
+function celula(c, x) {
+  const v = x[c.campo];
+  if (c.chip) return `<td>${chip(c.chip, v)}</td>`;
+  if (c.nat) return `<td>${esc(nat(v))}</td>`;
+  if (c.tipo === 'data') return `<td class="mono">${v ? brDate(v) : vazio}</td>`;
+  if (c.tipo === 'dinheiro') return `<td class="num">${v === null || v === undefined || v === '' ? vazio : money(v)}</td>`;
+  if (c.tipo === 'numero') {
+    if (v === null || v === undefined || v === '') return `<td class="num">${vazio}</td>`;
+    const z = +v || 0;
+    if (c.zero && !z) return `<td class="num">${vazio}</td>`;
+    const cls = (c.sinal && z < 0) || (c.alerta && z > 0) ? ' neg' : c.forte ? ' pos' : '';
+    return `<td class="num${cls}">${qt(z)}</td>`;
+  }
+  if (c.desc) return `<td class="desc" title="${esc(v || '')}">${esc((v || '—').slice(0, 52))}</td>`;
+  const rep = c.campo === 'cod_item' && +x.cadastros > 1
+    ? ` <span class="chip warn" title="O ERP tem ${n(x.cadastros)} cadastros com este código; cada um tem o seu saldo.">${n(x.cadastros)}×</span>` : '';
+  return `<td${c.mono ? ' class="mono"' : ''}>${v ? esc(String(v).slice(0, 40)) : vazio}${rep}</td>`;
+}
+
+function desenhar(doInicio) {
+  const def = ABAS[aba];
+  const agrupado = !!def.nota && $('f-agrupar').checked;
+  let xs = filtrar();
+  const filtradas = xs.length;
+  if (agrupado) xs = porNota(xs, def);
+  // 'oculta' não ocupa a tela, mas fica à mão na exportação.
+  const cabem = def.colunas.filter(c => agrupado ? !c.item : !c.grupo);
+  colunasVistas = cabem.filter(c => !c.oculta);
+  colunasExport = cabem;
+
+  const [campo, dir] = ordem[aba];
+  const col = def.colunas.find(c => c.campo === campo) || {};
+  const numerico = col.tipo === 'numero' || col.tipo === 'dinheiro';
+  xs.sort((a, b) => {
+    const va = a[campo], vb = b[campo];
+    const na = va === null || va === undefined || va === '', nb = vb === null || vb === undefined || vb === '';
+    if (na || nb) return na === nb ? 0 : na ? 1 : -1;       // vazio sempre no fim
+    return dir * (numerico ? (+va - +vb) : String(va).localeCompare(String(vb), 'pt-BR', { numeric: true }));
+  });
+  vistas = xs;
+  if (doInicio) mostradas = LOTE;
+
+  const t = $('tbl');
+  t.querySelector('thead').innerHTML = '<tr>' + colunasVistas.map(c => `
+    <th class="ord${c.tipo === 'numero' || c.tipo === 'dinheiro' ? ' num' : ''}${c.desc ? ' desc' : ''}"
+        data-campo="${c.campo}">${esc(c.rotulo)}${c.campo === campo
+          ? `<span class="seta">${dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`).join('') + '</tr>';
+  const pedaco = xs.slice(0, mostradas);
+  t.querySelector('tbody').innerHTML = pedaco.length
+    ? pedaco.map((x, i) => `<tr class="clic" data-i="${i}">` +
+        colunasVistas.map(c => celula(c, x)).join('') + '</tr>').join('')
+    : `<tr><td colspan="${colunasVistas.length}" class="skel">nada com esses filtros</td></tr>`;
+
+  const velho = t.querySelector('tfoot'); if (velho) velho.remove();
+  if (xs.length) {
+    let primeiro = true;
+    t.insertAdjacentHTML('beforeend', '<tfoot><tr>' + colunasVistas.map(c => {
+      if (c.soma) {
+        const s = xs.reduce((a, x) => a + (+x[c.campo] || 0), 0);
+        return `<td class="num">${c.tipo === 'dinheiro' ? money(s) : qt(s)}</td>`;
+      }
+      if (primeiro) { primeiro = false; return `<td>${n(xs.length)}</td>`; }
+      return '<td></td>';
+    }).join('') + '</tr></tfoot>');
+  }
+
+  $('mais').hidden = xs.length <= mostradas;
+  $('mais').textContent = `Mostrar mais ${n(Math.min(LOTE, xs.length - mostradas))} ` +
+                          `(${n(xs.length - mostradas)} restantes)`;
+  const total = (dados[aba] || []).length;
+  $('resumo-filtro').textContent =
+    (def.nota ? `${n(xs.length)} ${agrupado ? 'notas' : 'itens de nota'}` +
+                (agrupado ? ` · ${n(filtradas)} itens` : '')
+              : `${n(xs.length)} linhas`) +
+    (filtradas < total ? ` — filtrado de ${n(total)}` : '') +
+    (xs.length > mostradas ? ` · mostrando ${n(mostradas)}; os totais e a exportação valem para todas` : '');
+}
+
+/* ------------------------------------------------------- detalhe ao clicar */
+function tabelaKardex(ks, alvo) {
+  return `<div class="wrap"><table><thead><tr>
+      <th>Data</th><th>Documento</th><th>Operação</th><th>Entidade</th>
+      <th class="num">Entrada</th><th class="num">Saída</th><th class="num">Saldo</th>
+      <th class="num" title="Saldo do terceiro depois da linha: o que foi menos o que voltou">Com o terceiro</th>
+    </tr></thead><tbody>` + ks.map(k => `
+    <tr class="${+k.saldo < 0 ? 'linha-neg' : ''}${alvo && +k.seq === +alvo ? ' alvo' : ''}">
+      <td class="mono">${brDate(k.dt)}</td><td class="mono">${esc(k.doc_texto || '—')}</td>
+      <td>${esc(k.tipo || '—')}</td><td>${esc((k.entidade || '—').slice(0, 30))}</td>
+      <td class="num">${+k.ent ? qt(k.ent) : vazio}</td>
+      <td class="num">${+k.sai ? qt(k.sai) : vazio}</td>
+      <td class="num${+k.saldo < 0 ? ' neg' : ''}"><b>${qt(k.saldo)}</b></td>
+      <td class="num${+k.fora < 0 ? ' neg' : ''}">${k.fora === null || k.fora === undefined ? vazio : qt(k.fora)}</td>
+    </tr>`).join('') + '</tbody></table></div>';
+}
+
+async function abrirKardex(cod, descr, alvo) {
+  const p = abrirPainel(`${esc(cod)} — ${esc((descr || '').slice(0, 70))}`,
+                        'Kardex do ERP, com o saldo recalculado linha a linha');
+  try {
+    const ks = await api(`/api/real/kardex?id=${encodeURIComponent(arquivoId)}` +
+      `&cod=${encodeURIComponent(cod)}&descr=${encodeURIComponent(descr || '')}`);
+    const neg = ks.filter(k => +k.saldo < 0).length;
+    p.corpo.innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.6">
+        ${n(ks.length)} movimentos${neg ? ` · <b class="neg">${n(neg)} com o depósito negativo</b> (linhas marcadas)` : ''}.
+        <b>Com o terceiro</b> é o saldo daquele armazém ou cliente depois da linha;
+        negativo ali é retorno sem remessa.</p>` + tabelaKardex(ks, alvo);
+    const el = p.corpo.querySelector('tr.alvo');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+  } catch (e) {
+    p.corpo.innerHTML = `<div class="skel">${esc(e.message)}</div>`;
+  }
+}
+
+function abrirNota(g) {
+  const def = ABAS[aba];
+  const p = abrirPainel(esc(g.doc_texto || 'Documento'),
+    `${brDate(g.dt)} · ${esc(g.tipo || '')} · ${esc(g.entidade || '')}`);
+  const cols = def.colunas.filter(c => !c.grupo &&
+    !['dt', 'doc_texto', 'tipo', 'entidade', 'natureza'].includes(c.campo));
+  p.corpo.innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 12px">
+      ${n(g.linhas.length)} item(ns) desta nota na lista. Clique num item para abrir o Kardex dele.</p>
+    <div class="wrap"><table><thead><tr>${cols.map(c =>
+      `<th${c.tipo === 'numero' ? ' class="num"' : ''}>${esc(c.rotulo)}</th>`).join('')}</tr></thead>
+    <tbody>${g.linhas.map((x, i) => `<tr class="clic" data-i="${i}">${
+      cols.map(c => celula(c, x)).join('')}</tr>`).join('')}</tbody></table></div>`;
+  p.corpo.querySelector('tbody').onclick = e => {
+    const tr = e.target.closest('tr[data-i]');
+    if (!tr) return;
+    const x = g.linhas[+tr.dataset.i];
+    p.fechar();
+    abrirKardex(x.cod_item, x.descr_item, x.seq);
+  };
+}
+
+/* ------------------------------------------------------------------ eventos */
+$('tbl').querySelector('thead').onclick = e => {
+  const th = e.target.closest('th[data-campo]');
+  if (!th) return;
+  const o = ordem[aba];
+  ordem[aba] = o[0] === th.dataset.campo ? [o[0], -o[1]] : [th.dataset.campo, 1];
+  desenhar(true);
+};
+$('tbl').querySelector('tbody').onclick = e => {
+  const tr = e.target.closest('tr[data-i]');
+  if (!tr) return;
+  const x = vistas[+tr.dataset.i];
+  if (!x) return;
+  if (x.linhas) abrirNota(x);
+  else if (x.cod_item) abrirKardex(x.cod_item, x.descr_item, x.seq);
+};
+$('mais').onclick = () => { mostradas += LOTE; desenhar(false); };
+
+let espera;
+const redesenhar = () => { clearTimeout(espera); espera = setTimeout(() => desenhar(true), 180); };
+['q', 'f-ent', 'f-min'].forEach(id => $(id).oninput = redesenhar);
+['f-sit', 'f-de', 'f-ate', 'f-prazo', 'f-cura', 'f-agrupar', 'f-so-estoque'].forEach(
+  id => $(id).onchange = () => desenhar(true));
+
+// Listas de marcar: abrem no botão, fecham fora; marcar redesenha na hora.
+[['m-nat', marcados.nat], ['m-tipo', marcados.tipo]].forEach(([id, set]) => {
+  const cx = $(id), lista = $(id + '-lista'), bt = $(id + '-btn');
+  const mostrar = abrir => {
+    lista.hidden = !abrir;
+    if (abrir) cx.dataset.aberto = '1'; else delete cx.dataset.aberto;
+  };
+  bt.onclick = e => { e.stopPropagation(); mostrar(lista.hidden); };
+  lista.onclick = e => {
+    e.stopPropagation();
+    if (e.target.dataset && e.target.dataset.tudo) {
+      set.clear();
+      lista.querySelectorAll('input').forEach(i => i.checked = false);
+    } else if (e.target.tagName === 'INPUT') {
+      if (e.target.checked) set.add(e.target.value); else set.delete(e.target.value);
+    } else return;
+    rotulosMulti();
+    desenhar(true);
+  };
+  document.addEventListener('click', () => mostrar(false));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') mostrar(false); });
+});
+
+$('limpar').onclick = () => {
+  ['q', 'f-de', 'f-ate', 'f-ent', 'f-min'].forEach(id => $(id).value = '');
+  ['f-sit', 'f-prazo', 'f-cura'].forEach(id => { if ($(id).options.length) $(id).selectedIndex = 0; });
+  $('f-so-estoque').checked = false;
+  marcados.nat.clear(); marcados.tipo.clear();
+  document.querySelectorAll('.multi-lista input').forEach(i => i.checked = false);
+  rotulosMulti();
+  desenhar(true);
+};
+
+$('abas').querySelectorAll('[data-aba]').forEach(b => b.onclick = () => abrirAba(b.dataset.aba));
+$('arquivo').onchange = () => carregar($('arquivo').value);
+
+/* --------------------------------------------------------------- exportação */
+$('exportar').onclick = () => {
+  if (!arquivoId || !vistas.length) return;
+  const def = ABAS[aba], bt = $('abas').querySelector(`[data-aba="${aba}"]`);
+  const a = [...$('arquivo').options].find(o => o.selected);
+  const titulo = bt.textContent.replace(/\s*\(.*\)$/, '').trim();
+  const total = (dados[aba] || []).length;
+  painelExportar({
+    titulo: 'Estoque real — ' + titulo,
+    subtitulo: (a ? a.textContent.replace(/\s+/g, ' ').trim() : '') +
+               ` · ${n(vistas.length)} linhas` + (filtrar().length < total ? ' (com filtro)' : ''),
+    aba: titulo.slice(0, 28),
+    colunas: colunasExport.map(c => ({
+      campo: c.chip || c.nat ? c.campo + '_txt' : c.campo, rotulo: c.rotulo,
+      tipo: c.tipo || 'texto', soma: !!c.soma, marcada: c.exp !== false })),
+    // Situação e natureza saem por extenso: o código interno não diz nada a
+    // quem recebe o relatório.
+    linhas: vistas.map(x => {
+      const l = { ...x };
+      delete l.linhas;
+      def.colunas.forEach(c => {
+        if (c.chip) l[c.campo + '_txt'] = (c.chip[x[c.campo]] || [x[c.campo]])[0];
+        if (c.nat) l[c.campo + '_txt'] = nat(x[c.campo]);
+      });
+      return l;
+    }),
+  });
+};
+
+carregar();
+</script>
+</body>
+</html>

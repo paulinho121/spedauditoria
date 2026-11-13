@@ -37,6 +37,7 @@ td.igual { color: var(--on-surface-variant); }
     <a href="/resultado">Resultado</a>
     <a href="/importar">Importar</a>
     <a class="on" href="/erp">ERP</a>
+    <a href="/estoque-real">Estoque real</a>
     <a href="/achados">Achados</a>
     <a href="/relatorio">Relatório</a>
     <a href="/manual">Manual</a>
@@ -63,8 +64,8 @@ td.igual { color: var(--on-surface-variant); }
     <div class="lbl">Enviar o extrato do ERP</div>
     <div class="drop" id="drop" style="margin-top:12px">
       <h3>Arraste o arquivo do ERP aqui</h3>
-      <p>ou clique para escolher — o <b>extrato de produtos</b> em .xlsx
-         (movimento a movimento) ou o <b>saldo de produtos</b> em .json
+      <p>ou clique para escolher — o <b>extrato de produtos</b> em .xlsx ou
+         .json (movimento a movimento) ou o <b>saldo de produtos</b> em .json
          (a foto do estoque numa data)</p>
       <input type="file" id="file" multiple accept=".xlsx,.xlsm,.json" hidden>
     </div>
@@ -525,13 +526,24 @@ async function enviar(arquivos) {
   log.innerHTML = '';
   $('prog').hidden = false; $('prog').value = 10;
   linha(`Lendo ${xs.length} arquivo(s)…`, 'mut');
-  const payload = await Promise.all(xs.map(async f =>
-    ({ nome: f.name, base64: await emBase64(f) })));
-  $('prog').value = 40;
   try {
-    const r = await apiPost('/api/import/upload', { arquivos: payload });
+    // Extrato grande em JSON não cabe num envio só: vai em partes.
+    const feitos = [], normais = [];
+    for (const f of xs) {
+      let r = null;
+      if (/\.json$/i.test(f.name) && f.size > LIMITE_ENVIO) {
+        linha(`${f.name}: ${(f.size / 1048576).toFixed(1)} MB — enviando em partes…`, 'mut');
+        r = await enviarExtratoEmPartes(f, (p, t) => { $('prog').value = 10 + 85 * p / t; });
+      }
+      if (r) feitos.push(r); else normais.push(f);
+    }
+    const payload = await Promise.all(normais.map(async f =>
+      ({ nome: f.name, base64: await emBase64(f) })));
+    $('prog').value = 40;
+    const r = payload.length ? await apiPost('/api/import/upload', { arquivos: payload })
+                             : { arquivos: [] };
     $('prog').value = 100;
-    (r.arquivos || []).forEach(a => {
+    feitos.concat(r.arquivos || []).forEach(a => {
       linha(`${a.arquivo}: ${a.situacao}`, a.situacao === 'ignorado' ? 'err' : '');
       (a.avisos || []).forEach(v => linha('    ' + v, 'mut'));
     });

@@ -298,7 +298,61 @@ def erp_arquivos(qs):
         "select id, nome_arquivo, deposito, cnpj, uf, dt_ini::text dt_ini, "
         "       dt_fin::text dt_fin, linhas, itens, movimentos, aberturas, vigente, "
         "       problemas, importado_por, to_char(importado_em,'DD/MM/YYYY HH24:MI') importado "
-        "from erp_extrato_arquivo order by dt_ini desc, importado_em desc")
+        "from erp_extrato_arquivo where completo "
+        "order by dt_ini desc, importado_em desc")
+
+
+# --------------------------------------------------- estoque real (Kardex ERP)
+def _real_arquivo(qs):
+    """O extrato a analisar: o pedido, ou o vigente de período mais longo."""
+    aid = int((qs.get("id") or ["0"])[0] or 0)
+    if not aid:
+        r = query("select id from erp_extrato_arquivo where vigente and completo "
+                  "order by (dt_fin - dt_ini) desc, id desc limit 1")
+        aid = int(r[0]["id"]) if r else 0
+    if aid:
+        # A base do cálculo é guardada; na primeira vez ela é montada aqui.
+        sql = f"select erp_real_pronto({aid}) p"
+        if not query(sql)[0]["p"]:
+            query(f"select erp_real_prepara({aid}) n")
+            _cache.pop(sql, None)
+    return aid
+
+
+def real_resumo(qs):
+    """Os extratos disponíveis e os números do topo da tela Estoque real."""
+    arqs = query(
+        "select id, nome_arquivo, deposito, uf, cnpj, dt_ini::text dt_ini, "
+        "       dt_fin::text dt_fin, linhas, itens, aberturas, vigente, problemas "
+        "from erp_extrato_arquivo where completo "
+        "order by (dt_fin - dt_ini) desc, id desc")
+    aid = _real_arquivo(qs)
+    if not aid:
+        return {"arquivos": arqs, "arquivo": None, "resumo": None}
+    r = query(f"select erp_real_resumo({aid}) r")[0]["r"]
+    return {"arquivos": arqs,
+            "arquivo": next((a for a in arqs if int(a["id"]) == aid), None),
+            "resumo": json.loads(r) if isinstance(r, str) else r}
+
+
+def _real_lista(funcao):
+    def rota(qs):
+        aid = _real_arquivo(qs)
+        return query(f"select * from {funcao}({aid})") if aid else []
+    return rota
+
+
+def real_kardex(qs):
+    """Os movimentos de um produto, com o saldo corrido — o detalhe da linha."""
+    aid = _real_arquivo(qs)
+    lit = lambda k: "'" + (qs.get(k) or [""])[0].replace("'", "''") + "'"
+    if not aid:
+        return []
+    return query(
+        "select seq, dt, hora, doc_texto, tipo, natureza, entidade, ent, sai, "
+        "       saldo, saldo_impresso, fora, custo_entrada "
+        f"from erp_real_linha where arquivo_id = {aid} "
+        f"and cod_item = {lit('cod')} and descr_item = {lit('descr')} order by seq")
 
 
 def erp_saldos(qs):
@@ -456,7 +510,7 @@ def importar_upload(body):
     os.makedirs(destino, exist_ok=True)
     import base64
     from auditoria import carga, carga_ecd, carga_erp, ecd, erp, saldo_erp
-    gravados = []
+    gravados, fatias = [], {}
     for arq in (body or {}).get("arquivos", []):
         nome = os.path.basename(arq.get("nome") or "")
         if not nome.lower().endswith((".xml", ".txt", ".xlsx", ".xlsm", ".json")):
@@ -471,6 +525,8 @@ def importar_upload(body):
             with open(caminho, "w", encoding="utf-8", newline="") as fh:
                 fh.write(arq.get("conteudo") or "")
         gravados.append(caminho)
+        if arq.get("extrato"):
+            fatias[caminho] = arq["extrato"]
     if not gravados:
         return {"erro": "nenhum arquivo .xml, .txt, .xlsx ou .json recebido"}
     res = []
@@ -479,12 +535,32 @@ def importar_upload(body):
             res.append(carga_nfe.importa(c))
             continue
         if c.lower().endswith(".json"):
-            # JSON: hoje só o saldo de produtos do ERP, reconhecido pelas
-            # colunas. É foto de posição, não movimento.
+            # JSON do ERP: o extrato de movimentos ou o saldo de produtos,
+            # reconhecidos pelas colunas — o nome do arquivo não decide nada.
             try:
+                if c in fatias:
+                    # Fatia de um extrato grande, cortada pelo navegador.
+                    m = fatias[c]
+                    r, bruto = carga_erp.importa_parte(c, m)
+                    fim = bruto.get("situacao") != "parte"
+                    av = ([f"Extrato do ERP: {r.linhas} linhas, depósito "
+                           f"{r.deposito or '?'}"] if fim else
+                          [f"parte {m.get('parte')} de {m.get('partes')} recebida"]) + \
+                         [f"{t}: {d}" for t, d in r.problemas[:20]]
+                    res.append(carga_nfe.ResultadoNFe(os.path.basename(c), r.situacao,
+                                                      avisos=av))
+                    continue
+                if erp.e_extrato_erp(c):
+                    r = carga_erp.importa(c)
+                    av = [f"Extrato do ERP: {r.linhas} linhas, {r.itens} itens, "
+                          f"depósito {r.deposito or '?'}"] + \
+                         [f"{t}: {d}" for t, d in r.problemas[:20]]
+                    res.append(carga_nfe.ResultadoNFe(os.path.basename(c), r.situacao,
+                                                      avisos=av))
+                    continue
                 if not saldo_erp.e_saldo_erp(c):
-                    raise ValueError("JSON não reconhecido — esperava o relatório "
-                                     "de saldo de produtos do ERP")
+                    raise ValueError("JSON não reconhecido — esperava o extrato "
+                                     "de movimentos ou o saldo de produtos do ERP")
                 r = carga_erp.importa_saldo(c)
                 av = [f"Saldo do ERP em {r.dt}: {r.itens} itens, "
                       f"depósito {r.deposito or '?'}"] +                      [f"{t}: {d}" for t, d in r.problemas]
@@ -730,6 +806,13 @@ ROUTES = {
     "/api/erp/confronto": erp_confronto,
     "/api/erp/saldos": erp_saldos,
     "/api/erp/saldo": erp_saldo,
+    "/api/real": real_resumo,
+    "/api/real/produtos": _real_lista("erp_real_produtos"),
+    "/api/real/sem-estoque": _real_lista("erp_real_sem_estoque"),
+    "/api/real/sem-remessa": _real_lista("erp_real_sem_remessa"),
+    "/api/real/terceiros": _real_lista("erp_real_em_terceiros"),
+    "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias"),
+    "/api/real/kardex": real_kardex,
     "/api/periodo/cfops": lambda qs: query(sql_conferencia_cfop(
         (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0])),
     "/api/periodo/cfop/itens": lambda qs: query(sql_conferencia_cfop_detalhe(
@@ -942,6 +1025,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/importar.html"
         if path == "/erp":
             path = "/erp.html"
+        if path == "/estoque-real":
+            path = "/estoque_real.html"
         if path == "/relatorio":
             path = "/relatorio.html"
         if path == "/manual":

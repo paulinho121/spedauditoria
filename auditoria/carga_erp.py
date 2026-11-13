@@ -54,13 +54,87 @@ def payload(caminho, quem=None):
     }, e, probs
 
 
+# Acima disto o extrato vai em partes: uma chamada só não comporta o extrato de
+# anos de um depósito (vinte mil linhas, doze megabytes).
+LOTE = 2500
+
+
+def partes(p, lote=LOTE):
+    """
+    Fatia o payload para importar_erp_extrato_parte. Cada fatia leva o
+    cabeçalho do arquivo com 'parte' e 'partes'; a última é a que publica.
+    """
+    linhas = p["linhas"]
+    n = max(1, -(-len(linhas) // lote))
+    for i in range(n):
+        cab = dict(p["arquivo"], parte=i + 1, partes=n)
+        if i:
+            # Os avisos vão uma vez só; o banco soma os de cada parte.
+            cab["problemas"] = []
+        yield {"arquivo": cab, "linhas": linhas[i * lote:(i + 1) * lote]}
+
+
+def payload_parte(caminho, meta, quem=None):
+    """
+    Uma fatia do extrato cortada pelo NAVEGADOR (o arquivo inteiro não passa
+    pelo limite de envio da versão web). O arquivo em disco é só a fatia;
+    'meta' diz de que arquivo ela é e onde ela começa:
+
+        {"sha256": do arquivo inteiro, "parte": 2, "partes": 9,
+         "total": linhas do arquivo inteiro, "inicio": linhas antes desta fatia}
+
+    A fatia começa sempre na troca de produto, então conferir o saldo corrido
+    dentro dela é o mesmo que conferir no arquivo inteiro.
+    """
+    e = perp.parse(caminho)
+    probs = list(e.problemas) + perp.confere(e)
+    inicio = int(meta.get("inicio") or 0)
+    for l in e.linhas:
+        l["seq"] += inicio
+    quem = quem or os.environ.get("AUDITOR") or getpass.getuser()
+    return {
+        "arquivo": {
+            "nome_arquivo": e.nome_arquivo, "sha256": str(meta["sha256"]),
+            "deposito": e.depositos[0] if e.depositos else None,
+            # Período e contagens o banco calcula na última parte.
+            "linhas": int(meta["total"]),
+            "parte": int(meta["parte"]), "partes": int(meta["partes"]),
+            "problemas": [{"tipo": t, "detalhe": d} for t, d in probs],
+            "importado_por": quem,
+        },
+        "linhas": e.linhas,
+    }, e, probs
+
+
+def importa_parte(caminho, meta, quem=None, con=None):
+    con = con or db.conecta()
+    p, e, probs = payload_parte(caminho, meta, quem)
+    r = _resposta(con.consulta("select importar_erp_extrato_parte(%s::jsonb) as r",
+                               (carga_json.como_texto(p),)))
+    return ResultadoERP(os.path.basename(caminho), r.get("situacao", "?"),
+                        r.get("arquivo_id"), int(r.get("linhas") or 0), e.itens,
+                        r.get("cnpj"), r.get("deposito"), probs), r
+
+
+def _resposta(r):
+    r = r[0]["r"] if isinstance(r, list) else r["r"]
+    return json.loads(r) if isinstance(r, str) else (r or {})
+
+
 def importa(caminho, quem=None, con=None):
     con = con or db.conecta()
     p, e, probs = payload(caminho, quem)
-    r = con.consulta("select importar_erp_extrato(%s::jsonb) as r",
-                     (carga_json.como_texto(p),))
-    r = r[0]["r"] if isinstance(r, list) else r["r"]
-    r = json.loads(r) if isinstance(r, str) else (r or {})
+    if len(p["linhas"]) > LOTE:
+        r = {}
+        for parte in partes(p):
+            r = _resposta(con.consulta(
+                "select importar_erp_extrato_parte(%s::jsonb) as r",
+                (carga_json.como_texto(parte),)))
+            if r.get("situacao") == "ja_importado":
+                break
+    else:
+        r = _resposta(con.consulta("select importar_erp_extrato(%s::jsonb) as r",
+                                   (carga_json.como_texto(p),)))
     return ResultadoERP(os.path.basename(caminho), r.get("situacao", "?"),
                         r.get("arquivo_id"), int(r.get("linhas") or 0), e.itens,
                         r.get("cnpj"), r.get("deposito"), probs)

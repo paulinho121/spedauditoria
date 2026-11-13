@@ -19,9 +19,15 @@ Duas convenções do relatório que o parser precisa conhecer:
 O período não está escrito no arquivo; ele é deduzido dos movimentos, do
 primeiro dia do mês mais antigo ao último dia do mês mais recente. Por isso a
 abertura é confrontada com a nossa posição na véspera do dt_ini.
+
+O ERP exporta o mesmo relatório em planilha (.xlsx) e em JSON. O conteúdo é o
+mesmo; muda o envelope. No JSON cada linha é um objeto com chaves geradas pela
+tela ("columnquantidadeSaida10" — o número é só a ordem) e o produto vem numa
+chave de agrupamento ("_000GROUP"). As duas formas caem no mesmo leitor.
 """
 import calendar
 import hashlib
+import json
 import os
 import re
 import unicodedata
@@ -163,38 +169,120 @@ def e_extrato_erp(caminho):
     Basta ter o produto, o saldo e um dos lados do movimento: coluna a mais —
     NCM, referência do fabricante — não descaracteriza o relatório.
     """
-    if not caminho.lower().endswith((".xlsx", ".xlsm")):
-        return False
     try:
+        if caminho.lower().endswith(".json"):
+            regs = _registros_json(caminho)
+            return bool(regs) and _valido(_mapa_json(regs[0]))
+        if not caminho.lower().endswith((".xlsx", ".xlsm")):
+            return False
         primeira = next(iter(planilha.linhas(caminho)), [])
     except Exception:
         return False
-    m = mapa_colunas(primeira)
-    return ("agrupamento" in m and "qtd_saldo" in m
-            and ("qtd_entrada" in m or "qtd_saida" in m))
+    return _valido(mapa_colunas(primeira))
+
+
+# Chave do JSON (sem 'column' e sem o número) -> campo nosso.
+CHAVES_JSON = {
+    "ch_mov": ["chmov"], "dt": ["dtmov"], "hora": ["hrmov"],
+    "deposito": ["deposito"], "ref_fabricante": ["reffabricante"],
+    "ncm": ["ncm", "produtoncm"], "ch_doc": ["chdoc"],
+    "documento": ["operacaodeorigemdocumento", "documento"],
+    "tipo": ["operacaodeorigemtipo", "tipo"],
+    "entidade": ["operacaodeorigementidade", "entidade"],
+    "qtd_entrada": ["quantidadeentrada"], "qtd_saida": ["quantidadesaida"],
+    "qtd_saldo": ["quantidadesaldo"],
+    "custo_entrada": ["custoentrada"], "custo_saida": ["custosaida"],
+    "custo_saldo": ["custosaldo"], "custo_medio": ["customed", "customedio"],
+}
+RE_GRUPO = re.compile(r"^_?\d*group$", re.I)
+
+
+def _chave_json(nome):
+    t = re.sub(r"^column", "", str(nome or ""), flags=re.I)
+    return re.sub(r"\d+$", "", t).lower()
+
+
+def _mapa_json(registro):
+    """Campo nosso -> chave do objeto. O produto é a chave de agrupamento."""
+    achadas = {_chave_json(k): k for k in registro}
+    mapa = {}
+    for campo, nomes in CHAVES_JSON.items():
+        chave = next((achadas[a] for a in nomes if a in achadas), None)
+        if chave is not None:
+            mapa[campo] = chave
+    grupos = sorted(k for k in registro if RE_GRUPO.match(k))
+    if grupos:
+        # Com mais de um nível de agrupamento, o produto é o que tem cara de
+        # "código - descrição - unidade".
+        mapa["agrupamento"] = next(
+            (k for k in grupos if " - " in str(registro.get(k) or "")), grupos[0])
+    return mapa
+
+
+def _registros_json(caminho):
+    with open(caminho, encoding="utf-8-sig") as fh:
+        bruto = json.load(fh)
+    if isinstance(bruto, dict):
+        bruto = next((bruto[k] for k in ("dados", "registros", "linhas", "rows",
+                                         "data", "items")
+                      if isinstance(bruto.get(k), list)), [])
+    if not isinstance(bruto, list):
+        return []
+    return [r for r in bruto if isinstance(r, dict)]
+
+
+def _valido(mapa):
+    return ("agrupamento" in mapa and "qtd_saldo" in mapa
+            and ("qtd_entrada" in mapa or "qtd_saida" in mapa))
+
+
+def _fonte(caminho, aba, nome):
+    """
+    As linhas do relatório como (número, função que lê um campo), venha ele de
+    planilha ou de JSON. Daqui para a frente o leitor não sabe a diferença.
+    """
+    recusa = ValueError(f"{nome}: não parece o extrato de produtos do ERP — "
+                        f"cabeçalho inesperado.")
+    if caminho.lower().endswith(".json"):
+        regs = _registros_json(caminho)
+        mapa = _mapa_json(regs[0]) if regs else {}
+        if not _valido(mapa):
+            raise recusa
+
+        def linhas_json():
+            for n, reg in enumerate(regs, start=1):
+                def campo(nome_campo, reg=reg):
+                    if nome_campo not in mapa:
+                        return ""
+                    return str(reg.get(mapa[nome_campo]) or "").strip()
+                yield n, campo
+        return sorted(mapa), linhas_json()
+
+    it = iter(planilha.linhas(caminho, aba))
+    mapa = mapa_colunas(next(it, []))
+    if not _valido(mapa):
+        raise recusa
+
+    def linhas_planilha():
+        for n, lin in enumerate(it, start=2):
+            if not any((c or "").strip() for c in lin):
+                continue
+
+            def campo(nome_campo, lin=lin):
+                i = mapa.get(nome_campo)
+                return "" if i is None or i >= len(lin) else (lin[i] or "").strip()
+            yield n - 1, campo
+    return sorted(mapa), linhas_planilha()
 
 
 def parse(caminho, aba=None):
     e = ExtratoERP(nome_arquivo=os.path.basename(caminho), sha256=sha256(caminho))
-    it = iter(planilha.linhas(caminho, aba))
-    cab = next(it, [])
-    mapa = mapa_colunas(cab)
-    if not ("agrupamento" in mapa and "qtd_saldo" in mapa
-            and ("qtd_entrada" in mapa or "qtd_saida" in mapa)):
-        raise ValueError(f"{e.nome_arquivo}: não parece o extrato de produtos "
-                         f"do ERP — cabeçalho inesperado.")
-    e.colunas = sorted(mapa)
-
-    def col(r, campo):
-        i = mapa.get(campo)
-        if i is None or i >= len(r):
-            return ""
-        return (r[i] or "").strip()
+    e.colunas, fonte = _fonte(caminho, aba, e.nome_arquivo)
 
     itens, datas, depositos = set(), [], set()
-    for n, r in enumerate(it, start=2):
-        if not any((c or "").strip() for c in r):
-            continue
+    for n, campo in fonte:
+        # 'r' sobra da época em que só havia planilha; quem lê é 'campo'.
+        r, col = None, (lambda _r, c: campo(c))
         cod, descr, unid = _item(col(r, "agrupamento"))
         if not cod:
             continue
@@ -212,7 +300,7 @@ def parse(caminho, aba=None):
         if col(r, "deposito"):
             depositos.add(col(r, "deposito"))
         e.linhas.append({
-            "seq": n - 1, "abertura": abertura,
+            "seq": n, "abertura": abertura,
             "cod_item": cod, "descr_item": descr, "unid": unid,
             # O NCM só existe se o relatório trouxer a coluna; quando não vem,
             # o sistema o busca pelo código no cadastro 0200 e nos XML.
@@ -260,7 +348,10 @@ def confere(e):
     problemas = []
     saldo = {}
     for l in e.linhas:
-        chave = (l["cod_item"], l["deposito"] or (e.depositos[0] if e.depositos else ""))
+        # O mesmo código pode vir em dois cadastros, cada um com o seu saldo:
+        # a descrição entra na chave, senão um desmentiria o outro.
+        chave = (l["cod_item"], l["descr_item"],
+                 l["deposito"] or (e.depositos[0] if e.depositos else ""))
         esperado = (saldo.get(chave, 0) + (l["qtd_entrada"] or 0) - (l["qtd_saida"] or 0))
         impresso = l["qtd_saldo"]
         if impresso is not None and abs(esperado - impresso) > 0.001:

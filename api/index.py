@@ -205,6 +205,77 @@ def rota_erp_confronto(qs):
             "alertas": consulta_rest("rpc/erp_extrato_alertas", {"p_arquivo_id": aid})}
 
 
+def consulta_rest_tudo(view, params=None, pagina=1000):
+    """
+    Como consulta_rest, mas busca todas as páginas. O PostgREST corta a resposta
+    em mil linhas; lista de notas com quatro mil precisa de quatro idas.
+    """
+    tudo, offset = [], 0
+    while True:
+        p = dict(params or {}, limit=pagina, offset=offset)
+        parte = consulta_rest(view, p)
+        tudo.extend(parte)
+        if len(parte) < pagina:
+            return tudo
+        offset += pagina
+
+
+def _real_arquivo(qs):
+    """O extrato a analisar: o pedido, ou o vigente de período mais longo."""
+    aid = int((qs.get("id") or ["0"])[0] or 0)
+    if not aid:
+        arqs = consulta_rest("erp_extrato_arquivo", {
+            "vigente": "is.true", "completo": "is.true",
+            "select": "id,dt_ini,dt_fin"})
+        if arqs:
+            dias = lambda a: (a.get("dt_fin") or "") > "" and (
+                __import__("datetime").date.fromisoformat(a["dt_fin"])
+                - __import__("datetime").date.fromisoformat(a["dt_ini"])).days
+            aid = int(max(arqs, key=lambda a: (dias(a) or 0, a["id"]))["id"])
+    if aid and not chama_funcao("erp_real_pronto", {"p_arquivo_id": aid}):
+        # A base do cálculo é guardada; na primeira vez ela é montada aqui.
+        chama_funcao("erp_real_prepara", {"p_arquivo_id": aid}, timeout=55)
+    return aid
+
+
+def rota_real(qs):
+    """Os extratos disponíveis e os números do topo da tela Estoque real."""
+    arqs = consulta_rest("erp_extrato_arquivo", {
+        "completo": "is.true", "order": "dt_ini.asc,id.desc",
+        "select": "id,nome_arquivo,deposito,uf,cnpj,dt_ini,dt_fin,linhas,itens,"
+                  "aberturas,vigente,problemas"})
+    aid = _real_arquivo(qs)
+    if not aid:
+        return {"arquivos": arqs, "arquivo": None, "resumo": None}
+    return {"arquivos": arqs,
+            "arquivo": next((a for a in arqs if int(a["id"]) == aid), None),
+            "resumo": chama_funcao("erp_real_resumo", {"p_arquivo_id": aid})}
+
+
+def _real_lista(funcao, ordem):
+    def rota(qs):
+        aid = _real_arquivo(qs)
+        if not aid:
+            return []
+        return consulta_rest_tudo("rpc/" + funcao,
+                                  {"p_arquivo_id": aid, "order": ordem})
+    return rota
+
+
+def rota_real_kardex(qs):
+    """Os movimentos de um produto, com o saldo corrido."""
+    aid = _real_arquivo(qs)
+    if not aid:
+        return []
+    return consulta_rest_tudo("erp_real_linha", {
+        "arquivo_id": f"eq.{aid}",
+        "cod_item": "eq." + (qs.get("cod") or [""])[0],
+        "descr_item": "eq." + (qs.get("descr") or [""])[0],
+        "select": "seq,dt,hora,doc_texto,tipo,natureza,entidade,ent,sai,saldo,"
+                  "saldo_impresso,fora,custo_entrada",
+        "order": "seq"})
+
+
 def rota_erp_saldo(qs):
     """A foto do saldo do ERP contra a nossa posição. Sem id, a mais recente."""
     aid = int((qs.get("id") or ["0"])[0] or 0)
@@ -434,11 +505,18 @@ ROTAS = {
         "rpc/periodo_bloqueios",
         dict(zip(("p_ini", "p_fim"), _mes(qs)))),
     "/api/erp": lambda qs: consulta_rest("erp_extrato_arquivo", {
-        "order": "dt_ini.desc,importado_em.desc"}),
+        "completo": "is.true", "order": "dt_ini.desc,importado_em.desc"}),
     "/api/erp/confronto": rota_erp_confronto,
     "/api/erp/saldos": lambda qs: consulta_rest("erp_saldo_arquivo", {
         "order": "dt.desc,importado_em.desc"}),
     "/api/erp/saldo": rota_erp_saldo,
+    "/api/real": rota_real,
+    "/api/real/produtos": _real_lista("erp_real_produtos", "cod_item,descr_item"),
+    "/api/real/sem-estoque": _real_lista("erp_real_sem_estoque", "dt,seq"),
+    "/api/real/sem-remessa": _real_lista("erp_real_sem_remessa", "dt,seq"),
+    "/api/real/terceiros": _real_lista("erp_real_em_terceiros", "dt,seq"),
+    "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias", "dt,seq"),
+    "/api/real/kardex": rota_real_kardex,
     "/api/periodo/cfops": lambda qs: consulta_rest(
         "rpc/conferencia_cfop", _faturamento_params(qs)),
     "/api/periodo/cfop/itens": lambda qs: rota_cfop_detalhe(
@@ -629,14 +707,31 @@ def importar_upload(corpo):
                 with open(caminho, "w", encoding=cod, errors="replace", newline="") as fh:
                     fh.write(arq.get("conteudo") or "")
             if nome.lower().endswith(".json"):
-                # JSON: só o saldo de produtos do ERP — foto de posição.
-                from auditoria import carga_erp, saldo_erp as psaldo
-                if not psaldo.e_saldo_erp(caminho):
-                    raise ValueError("JSON não reconhecido — esperava o relatório "
-                                     "de saldo de produtos do ERP")
-                payload, _s = carga_erp.payload_saldo(caminho)
-                r = chama_rpc("importar_erp_saldo", payload)
-                probs = []
+                # JSON do ERP: o extrato de movimentos ou o saldo de produtos,
+                # reconhecidos pelas colunas.
+                from auditoria import carga_erp, erp as perp, saldo_erp as psaldo
+                if arq.get("extrato"):
+                    # Fatia de um extrato grande, cortada pelo navegador: o
+                    # arquivo inteiro não passa pelo limite de envio.
+                    payload, _e, probs = carga_erp.payload_parte(caminho, arq["extrato"])
+                    r = chama_rpc("importar_erp_extrato_parte", payload)
+                    if r.get("situacao") == "parte":
+                        probs = [("parte", f"{arq['extrato'].get('parte')} de "
+                                           f"{arq['extrato'].get('partes')} recebida")] + probs
+                elif perp.e_extrato_erp(caminho):
+                    payload, _e, probs = carga_erp.payload(caminho)
+                    r = {}
+                    for parte in carga_erp.partes(payload):
+                        r = chama_rpc("importar_erp_extrato_parte", parte)
+                        if r.get("situacao") == "ja_importado":
+                            break
+                elif not psaldo.e_saldo_erp(caminho):
+                    raise ValueError("JSON não reconhecido — esperava o extrato de "
+                                     "movimentos ou o saldo de produtos do ERP")
+                else:
+                    payload, _s = carga_erp.payload_saldo(caminho)
+                    r = chama_rpc("importar_erp_saldo", payload)
+                    probs = []
             elif nome.lower().endswith((".xlsx", ".xlsm")):
                 # Planilha: só o extrato de produtos do ERP, reconhecido pelo
                 # cabeçalho. Chega sempre em base64 — é um zip.
@@ -762,6 +857,8 @@ def app(environ, start_response):
         caminho = "/importar.html"
     elif caminho == "/erp":
         caminho = "/erp.html"
+    elif caminho == "/estoque-real":
+        caminho = "/estoque_real.html"
     elif caminho == "/relatorio":
         caminho = "/relatorio.html"
     elif caminho == "/manual":

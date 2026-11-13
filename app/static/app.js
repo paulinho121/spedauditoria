@@ -396,3 +396,67 @@ function baixarBase64(nome, tipo, b64) {
   // Revogar na hora cancelaria o download em alguns navegadores.
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
+
+
+/* ------------------------------------------------ extrato grande, em partes
+   O extrato de anos de um depósito passa de 10 MB, e a versão web recusa corpo
+   acima de 4,5 MB. O navegador lê o JSON, corta em fatias e manda uma por vez;
+   o banco só publica o extrato quando a última chega e a contagem confere.   */
+const LIMITE_ENVIO = 3.5 * 1024 * 1024;
+const FATIA_EXTRATO = 1500;                // linhas por parte
+
+async function sha256Hex(buf) {
+  const h = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Onde cortar: só na troca de produto, para que cada fatia tenha o Kardex
+ * inteiro dos produtos que leva. Devolve pares [início, fim).
+ */
+function fatiasDoExtrato(regs, grupo, tamanho) {
+  const cortes = [];
+  let ini = 0;
+  for (let i = 1; i <= regs.length; i++) {
+    if (i === regs.length ||
+        (i - ini >= tamanho && regs[i][grupo] !== regs[i - 1][grupo])) {
+      cortes.push([ini, i]);
+      ini = i;
+    }
+  }
+  return cortes;
+}
+
+/**
+ * Envia um extrato do ERP em JSON, fatiado. Devolve o resultado do arquivo
+ * ({arquivo, situacao, avisos}) ou null se o arquivo não for um extrato — aí
+ * quem chamou segue pelo caminho normal.
+ */
+async function enviarExtratoEmPartes(file, progresso) {
+  const buf = await file.arrayBuffer();
+  let regs;
+  try { regs = JSON.parse(new TextDecoder('utf-8').decode(buf)); } catch (e) { return null; }
+  if (!Array.isArray(regs) || !regs.length || typeof regs[0] !== 'object') return null;
+  const chaves = Object.keys(regs[0]);
+  const grupo = chaves.find(k => /^_?\d*group$/i.test(k));
+  if (!grupo || !chaves.some(k => /quantidadesaldo/i.test(k))) return null;
+
+  const sha = await sha256Hex(buf);
+  const cortes = fatiasDoExtrato(regs, grupo, FATIA_EXTRATO);
+  const avisos = [];
+  let ultimo = null;
+  for (let p = 0; p < cortes.length; p++) {
+    const [a, b] = cortes[p];
+    const r = await apiPost('/api/import/upload', { arquivos: [{
+      nome: file.name, conteudo: JSON.stringify(regs.slice(a, b)),
+      extrato: { sha256: sha, parte: p + 1, partes: cortes.length,
+                 total: regs.length, inicio: a } }] });
+    ultimo = (r.arquivos || [])[0] || {};
+    if (ultimo.situacao === 'ignorado') return ultimo;       // a parte foi recusada
+    (ultimo.avisos || []).forEach(v => { if (!/^parte:? /.test(v)) avisos.push(v); });
+    if (progresso) progresso(p + 1, cortes.length);
+    if (ultimo.situacao === 'ja_importado') break;
+  }
+  return { arquivo: file.name, situacao: (ultimo || {}).situacao || '?',
+           avisos: [`${n(regs.length)} linhas em ${n(cortes.length)} parte(s)`].concat(avisos) };
+}
