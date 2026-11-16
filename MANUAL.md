@@ -115,7 +115,7 @@ local. O sistema aceita:
 | `.xml` | NF-e, NFS-e e evento de cancelamento |
 | `.txt` | EFD ICMS/IPI ou ECD — o sistema decide pelo conteúdo, não pela extensão |
 | `.xlsx` | Extrato de produtos por depósito do ERP (veja *Extrato do ERP*) |
-| `.json` | Saldo de produtos do ERP — a foto do estoque numa data |
+| `.json` | Do ERP, reconhecido pelas colunas: o **saldo de produtos** (a foto do estoque numa data) ou o **extrato de movimentos** (o Kardex, que alimenta a aba *Estoque real*) |
 
 Pelo terminal, em qualquer volume:
 
@@ -722,6 +722,102 @@ O sistema também confere o extrato **contra ele mesmo**: o saldo impresso em
 cada linha tem de ser o anterior mais a entrada menos a saída. Quando não
 fecha, o aviso aparece na importação — esse número não pode ser usado para
 auditar nada sem a ressalva.
+
+### Estoque real — as notas que faltam, pelo Kardex do ERP
+
+A aba **Estoque real** lê o **extrato de movimentos do ERP** (o relatório
+*Extrato de produtos por depósito, produto e lote*, em `.json` ou `.xlsx`) e
+confere o ERP **contra ele mesmo** — aqui não entram os XML. Ela responde três
+perguntas:
+
+| Pergunta | Aba | O que aparece |
+|---|---|---|
+| Que nota precisa de uma **entrada**? | *Precisa de ENTRADA* | Nota de saída emitida com o depósito sem saldo |
+| Que nota precisa de uma **saída**? | *Precisa de SAÍDA* | Retorno de terceiro sem remessa que o cubra |
+| Qual é o **estoque real**? | *Estoque real por produto* | Saldo do depósito + o que está em terceiros |
+
+**Enviar o extrato.** Arraste o arquivo na aba **ERP**. O extrato de anos de um
+depósito passa de 10 MB; a tela o envia **em partes**, e ele só passa a valer
+quando a última parte chega e a contagem de linhas confere — extrato pela
+metade nunca aparece. Pela linha de comando:
+
+```bash
+python -m auditoria importar "C:\caminho\Extrato de produtos*.json"
+```
+
+Exporte o extrato do **período inteiro num arquivo só**: o saldo é corrido, e
+um extrato que começa no meio da história começa do zero.
+
+#### Precisa de ENTRADA — saída sem estoque
+
+Cada linha é uma nota de saída emitida quando o saldo do depósito não cobria a
+quantidade. A coluna *Sem estoque* é só a parte descoberta.
+
+- **Coberta depois** — a entrada veio. A tela mostra qual foi (*Entrada que
+  cobriu*) e quantos dias depois. O estoque fechou; os documentos é que estão
+  fora de ordem. Quando a cobertura é um retorno de armazém, a mercadoria
+  estava no terceiro e saiu de lá antes de a nota de retorno ser emitida.
+- **Em aberto** — a entrada ainda não existe. É o que falta lançar hoje.
+
+#### Precisa de SAÍDA — retorno sem remessa
+
+Cada linha é uma entrada de retorno de um terceiro (armazém, locação, comodato,
+demonstração…) que devolveu **mais do que recebeu**. Falta a nota de remessa —
+ou, quando a mercadoria já estava lá antes do primeiro movimento do extrato,
+falta o **saldo inicial** daquele terceiro. A conta é feita por terceiro e por
+produto: sobra num armazém não cobre o que voltou a mais de outro.
+
+#### Em poder de terceiros — remessa sem retorno
+
+O que foi e ainda não voltou, nota a nota. Os retornos quitam as remessas mais
+antigas primeiro; *Pendente* é o que sobrou de cada nota, e *Dias fora* conta
+até o último movimento do extrato. Não é erro por si. Vira erro quando a
+mercadoria já voltou, ou foi vendida de lá, e ninguém emitiu a entrada de
+retorno.
+
+#### Estoque real por produto
+
+```
+estoque real = saldo do depósito no ERP + em poder de terceiros   (nunca negativo)
+```
+
+- **Em terceiros** é, em cada terceiro, o que foi menos o que voltou — só
+  quando sobra. Onde voltou a mais não há nada lá: o excesso já está no saldo
+  do depósito, e aparece na coluna *Voltou a mais*.
+- **Falta entrada** aparece quando nem somando terceiros a conta fecha: saiu
+  mais do que entrou. O estoque real desse produto é zero, e a quantidade é o
+  que precisa de nota de entrada.
+- Vale a posição **de hoje**, não o pior momento do caminho. Lançamento errado
+  que o cliente estornou depois, ou retorno emitido dias depois da venda, não
+  criam estoque. O tropeço continua visível em *Pior saldo* e nas listas de
+  notas.
+- **Valor** usa o custo unitário da **última compra** do produto no extrato
+  (sem compra, o do último retorno de armazém). O custo médio do ERP não serve
+  quando as saídas vêm com custo zero — a tela avisa quando é o caso.
+
+É um **piso**, não uma contagem. Onde o ERP começou sem saldo inicial, o
+extrato só prova o que se mexeu; mercadoria parada que nunca foi lançada não
+deixa rastro, e só o inventário físico mostra.
+
+Clique num produto para abrir o **Kardex** dele, com o saldo recalculado linha
+a linha e o saldo de cada terceiro. Clique numa nota para ver os itens dela.
+
+#### Filtros
+
+Busca por código, produto, nota ou cliente · situação · período · natureza e
+tipo de operação (pode marcar vários) · cliente ou terceiro · atraso da
+cobertura (ou tempo fora) · que tipo de entrada cobriu · quantidade mínima.
+Nas listas de notas, *uma linha por nota* alterna entre a nota e os itens
+dela. Clique no título de uma coluna para ordenar. Os totais do rodapé e a
+exportação valem para **tudo o que o filtro deixou passar**, e não só para as
+linhas desenhadas.
+
+#### Erros do extrato
+
+Antes de qualquer conclusão, a aba lista o que o próprio extrato tem de errado:
+linha em que o saldo impresso não é o anterior mais a entrada menos a saída, e
+quantidade com fração em produto vendido por unidade (valor digitado no campo
+de quantidade). Onde o saldo impresso não fecha, a tela usa o recalculado.
 
 ### Resultado contábil — lucro ou prejuízo
 
