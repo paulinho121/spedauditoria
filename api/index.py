@@ -517,6 +517,8 @@ ROTAS = {
     "/api/real/terceiros": _real_lista("erp_real_em_terceiros", "dt,seq"),
     "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias", "dt,seq"),
     "/api/real/kardex": rota_real_kardex,
+    # Definida mais abaixo, junto dos POST de ajuste: só é resolvida na chamada.
+    "/api/real/ajustes": lambda qs: rota_real_ajustes(qs),
     "/api/periodo/cfops": lambda qs: consulta_rest(
         "rpc/conferencia_cfop", _faturamento_params(qs)),
     "/api/periodo/cfop/itens": lambda qs: rota_cfop_detalhe(
@@ -659,12 +661,58 @@ def post_varrer(corpo, u):
 # POSTs que são só uma chamada de função no banco. Antes só o login e a
 # importação tinham tratamento aqui, e mudar o status de um achado ou rodar a
 # varredura caía em 404 no Vercel — funcionava apenas no servidor local.
+CAMPOS_AJUSTE = ("saldo_erp", "em_armazem", "em_locacao", "em_comodato",
+                 "em_demonstracao", "em_outros")
+
+
+def rota_real_ajustes(qs):
+    """Os ajustes manuais do extrato: o que o auditor pôs no lugar do ERP."""
+    aid = _real_arquivo(qs)
+    if not aid:
+        return []
+    return consulta_rest_tudo("erp_real_ajuste", {
+        "arquivo_id": f"eq.{aid}", "order": "id",
+        "select": "cod_item,descr_item,campo,qtd,qtd_original,observacao,"
+                  "ajustado_por,ajustado_em"})
+
+
+def post_real_ajustar(corpo, u):
+    """Grava ou desfaz (quantidade vazia) o ajuste de um componente de um produto."""
+    b = corpo or {}
+    campo = str(b.get("campo") or "")
+    if campo not in CAMPOS_AJUSTE:
+        raise Erro("campo de ajuste desconhecido")
+    bruto, qtd = b.get("qtd"), None
+    if bruto not in (None, ""):
+        try:
+            qtd = float(str(bruto).replace(",", "."))
+        except ValueError:
+            raise Erro("quantidade inválida")
+        if qtd != qtd or abs(qtd) > 1e9:
+            raise Erro("quantidade inválida")
+    orig = b.get("qtd_original")
+    return chama_rpc("erp_real_ajustar", {
+        "arquivo_id": int(b.get("id") or 0), "cod_item": str(b.get("cod") or ""),
+        "descr_item": str(b.get("descr") or ""), "campo": campo, "qtd": qtd,
+        "qtd_original": None if orig in (None, "") else float(orig),
+        "observacao": (str(b.get("obs") or "").strip()[:300] or None),
+        "ajustado_por": _quem(u)})
+
+
+def post_real_desfazer_ajustes(corpo, u):
+    n = chama_funcao("erp_real_desfazer_ajustes",
+                     {"p_arquivo_id": int((corpo or {}).get("id") or 0)})
+    return {"desfeitos": int(n or 0)}
+
+
 POSTS = {"/api/trabalhos/usar": post_trabalho_usar,
          "/api/trabalhos/novo": post_trabalho_novo,
          "/api/trabalhos/excluir": post_trabalho_excluir,
          "/api/achados/status": post_achado_status,
          "/api/varrer": post_varrer,
-         "/api/exportar": post_exportar}
+         "/api/exportar": post_exportar,
+         "/api/real/ajustar": post_real_ajustar,
+         "/api/real/desfazer-ajustes": post_real_desfazer_ajustes}
 
 
 def _sobe_auditoria():

@@ -802,6 +802,45 @@ deixa rastro, e só o inventário físico mostra.
 Clique num produto para abrir o **Kardex** dele, com o saldo recalculado linha
 a linha e o saldo de cada terceiro. Clique numa nota para ver os itens dela.
 
+#### Escolher o que entra na conta
+
+O quadro *O que entra na conta do estoque* tem uma caixa para cada componente:
+**Depósito (saldo do ERP)**, **Armazém**, **Locação**, **Comodato**,
+**Demonstração** e **Outros**. Marque só o que quer somar — os botões *Só o
+ERP*, *Só em terceiros* e *Tudo* fazem as combinações mais comuns. A coluna
+de estoque, o valor, o rodapé e a exportação passam a valer para a seleção; com
+seleção parcial a coluna se chama *Estoque selecionado*, para ninguém ler como
+estoque real um número que é só parte dele. A escolha fica guardada no seu
+navegador.
+
+#### Ajustar as quantidades
+
+O estoque que sai do extrato é o que o ERP prova. Quando você sabe o número
+certo — pela contagem física, pelo extrato do armazém —, pode pôr esse número no
+lugar:
+
+1. clique em **✎ Ajustar quantidades**: as seis colunas de componente viram
+   campos;
+2. digite a quantidade certa e saia do campo (Tab ou clique fora) — grava na
+   hora, e o estoque, o valor e os totais se refazem;
+3. clique em **✓ Concluir ajustes**.
+
+O ajuste é uma camada **por cima** do extrato, guardada no banco: vale para
+quem abrir a tela, em qualquer computador, e o número do ERP nunca se perde. A
+célula ajustada fica destacada e mostra o valor original ao passar o mouse;
+apagar o número (ou repetir o do extrato) desfaz o ajuste, e *Desfazer todos os
+ajustes* devolve o extrato inteiro. O filtro *Com ajuste manual* lista só o que
+foi mexido.
+
+Na exportação, a coluna **Ajustes manuais (antes → depois)** sai marcada sempre
+que houver ajuste, e o cabeçalho do arquivo diz o que foi somado e quantas
+quantidades foram ajustadas. Relatório com número mexido à mão e sem esse
+rastro não serve de papel de trabalho.
+
+O ajuste vale para **aquele extrato**. Se você importar um extrato novo do
+mesmo depósito, ele começa sem ajustes — os antigos continuam guardados no
+extrato anterior.
+
 #### Filtros
 
 Busca por código, produto, nota ou cliente · situação · período · natureza e

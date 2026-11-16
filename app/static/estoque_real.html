@@ -22,6 +22,13 @@ tr.clic { cursor: pointer; }
 tr.clic:hover td { background: var(--surface-low); }
 td.neg, b.neg { color: var(--error); font-weight: 700; }
 td.pos { font-weight: 700; }
+td.ajustado { background: var(--warn-bg); }
+td.ajustado::after { content: " ✎"; font-size: 10px; opacity: .7; }
+input.aj { width: 82px; text-align: right; padding: 3px 6px; font: inherit;
+           font-variant-numeric: tabular-nums; }
+input.aj.ajustado { border-color: var(--warn-fg); background: var(--warn-bg); font-weight: 700; }
+#componentes .filtros label { font-size: 13px; color: var(--on-surface); cursor: pointer; }
+#componentes button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
 tr.linha-neg td { background: var(--error-container); }
 tr.alvo td { outline: 2px solid var(--primary); outline-offset: -2px; }
 .resumo-filtro { font-size: 12.5px; color: var(--on-surface-variant); margin: 0 0 8px; }
@@ -86,6 +93,25 @@ tr.alvo td { outline: 2px solid var(--primary); outline-offset: -2px; }
   </div>
 
   <p class="muted" id="explica" style="font-size:13px;margin:12px 0 0;line-height:1.6"></p>
+
+  <div class="card" id="componentes" hidden style="margin:12px 0 0;padding:12px 16px">
+    <div class="lbl">O que entra na conta do estoque</div>
+    <div class="filtros" style="margin:8px 0 0">
+      <label><input type="checkbox" data-comp="saldo_erp" checked> Depósito (saldo do ERP)</label>
+      <label><input type="checkbox" data-comp="em_armazem" checked> Armazém</label>
+      <label><input type="checkbox" data-comp="em_locacao" checked> Locação</label>
+      <label><input type="checkbox" data-comp="em_comodato" checked> Comodato</label>
+      <label><input type="checkbox" data-comp="em_demonstracao" checked> Demonstração</label>
+      <label><input type="checkbox" data-comp="em_outros" checked> Outros</label>
+      <button type="button" data-so="erp">Só o ERP</button>
+      <button type="button" data-so="terceiros">Só em terceiros</button>
+      <button type="button" data-so="tudo">Tudo</button>
+      <span style="flex:1"></span>
+      <button type="button" id="editar">✎ Ajustar quantidades</button>
+      <button type="button" id="desfazer" hidden>Desfazer todos os ajustes</button>
+    </div>
+    <p class="muted" id="comp-resumo" style="font-size:12.5px;margin:8px 0 0;line-height:1.6"></p>
+  </div>
 
   <div class="filtros" id="filtros">
     <input type="search" id="q" placeholder="Código, produto, nota ou cliente…"
@@ -176,15 +202,18 @@ const ABAS = {
                 ['falta_entrada', 'Falta entrada (nem com terceiros fecha)'],
                 ['retorno_sem_remessa', 'Voltou de terceiro sem ter ido'],
                 ['ficou_negativo', 'Já ficou negativo no período'],
-                ['repetido', 'Código em mais de um cadastro'], ['ok', 'Fecha']],
-    ordem: ['valor_real', -1],
+                ['repetido', 'Código em mais de um cadastro'],
+                ['ajustado', 'Com ajuste manual'], ['ok', 'Fecha']],
+    ordem: ['valor_considerado', -1], qtd: 'considerado',
     explica: `<b>Estoque real</b> = saldo do depósito no ERP + o que está em poder
       de terceiros, sem deixar negativo. <b>Em terceiros</b> é, por terceiro, o
       que foi menos o que voltou — só quando sobra. <b>Voltou a mais</b> é o
       contrário: retornou sem ter sido remetido. <b>Falta entrada</b> aparece
       quando nem somando terceiros a conta fecha: saiu mais do que entrou.
       <b>Valor</b> é o estoque real pelo custo da última compra do produto no
-      extrato. Clique num produto para ver o Kardex dele.`,
+      extrato. Clique num produto para ver o Kardex dele. No quadro abaixo você
+      escolhe <b>o que entra na conta</b> (só o ERP, só terceiros, ou qualquer
+      combinação) e pode <b>ajustar as quantidades</b> à mão.`,
     colunas: [
       { campo: 'cod_item', rotulo: 'Código', mono: true },
       { campo: 'descr_item', rotulo: 'Produto', desc: true },
@@ -198,14 +227,16 @@ const ABAS = {
       num('em_terceiros', 'Em terceiros', { soma: true, zero: true }),
       num('retorno_sem_remessa', 'Voltou a mais', { soma: true, zero: true }),
       num('falta_entrada', 'Falta entrada', { soma: true, zero: true, alerta: true }),
-      num('estoque_real', 'Estoque real', { soma: true, forte: true }),
+      num('considerado', 'Estoque real', { soma: true, forte: true }),
+      num('estoque_real', 'Estoque real (todos os componentes)', { soma: true, oculta: true, exp: false }),
       { campo: 'custo', rotulo: 'Custo últ. compra', tipo: 'dinheiro' },
       { campo: 'custo_origem', rotulo: 'Origem do custo', oculta: true, exp: false },
       { campo: 'custo_erp', rotulo: 'Custo médio no ERP', tipo: 'dinheiro', oculta: true, exp: false },
       num('saldo_foto', 'Saldo na foto do ERP', { oculta: true, exp: false }),
       num('entradas', 'Entradas no período', { oculta: true, exp: false }),
       num('saidas', 'Saídas no período', { oculta: true, exp: false }),
-      { campo: 'valor_real', rotulo: 'Valor', tipo: 'dinheiro', soma: true },
+      { campo: 'valor_considerado', rotulo: 'Valor', tipo: 'dinheiro', soma: true },
+      { campo: 'ajustes_txt', rotulo: 'Ajustes manuais (antes → depois)', oculta: true, exp: false },
       num('menor_saldo', 'Pior saldo', { sinal: true, exp: false }),
       { campo: 'situacao', rotulo: 'Situação', chip: SIT_PRODUTO },
     ],
@@ -337,6 +368,94 @@ let arquivoId = null, resumo = null, aba = 'produtos';
 const dados = {};                        // aba -> linhas (carregadas ao abrir)
 const ordem = {};                        // aba -> [campo, direção]
 let vistas = [], colunasVistas = [], colunasExport = [], mostradas = LOTE;
+
+/* --------------------------------- componentes do estoque e ajustes manuais
+   O estoque real é uma soma: o saldo do depósito mais o que está com cada tipo
+   de terceiro. Aqui se escolhe o que entra na soma e, se for o caso, se põe à
+   mão a quantidade certa no lugar da que o extrato dá. O ajuste fica guardado
+   no banco, por cima do extrato — o número original nunca se perde.         */
+const COMPONENTES = [['saldo_erp', 'Depósito (ERP)'], ['em_armazem', 'Armazém'],
+                     ['em_locacao', 'Locação'], ['em_comodato', 'Comodato'],
+                     ['em_demonstracao', 'Demonstração'], ['em_outros', 'Outros']];
+const CAMPOS_COMP = COMPONENTES.map(c => c[0]);
+const TERCEIROS_COMP = CAMPOS_COMP.slice(1);
+// Derivadas: mudam quando um componente muda. São as células que se redesenham.
+const DERIVADAS = ['em_terceiros', 'falta_entrada', 'considerado', 'valor_considerado'];
+const escolhidos = new Set(CAMPOS_COMP);
+let ajustes = [], editando = false;
+
+// A escolha dos componentes é de quem está olhando: fica neste navegador.
+try {
+  const salvo = JSON.parse(localStorage.getItem('estoque_real_componentes') || 'null');
+  if (Array.isArray(salvo) && salvo.length) {
+    escolhidos.clear();
+    salvo.filter(c => CAMPOS_COMP.includes(c)).forEach(c => escolhidos.add(c));
+  }
+} catch (e) { /* sem armazenamento local: vale o padrão, tudo marcado */ }
+
+const chaveProd = x => `${x.cod_item}\u0001${x.descr_item || ''}`;
+const ajustada = (x, c) => !!x._o && Math.abs((+x[c] || 0) - x._o[c]) > 1e-9;
+
+/** Aplica ajustes e escolha de componentes sobre o que o extrato diz. */
+function recalcular() {
+  const xs = dados.produtos || [];
+  const mapa = new Map();
+  ajustes.forEach(a => {
+    const k = `${a.cod_item}\u0001${a.descr_item || ''}`;
+    if (!mapa.has(k)) mapa.set(k, {});
+    mapa.get(k)[a.campo] = +a.qtd;
+  });
+  xs.forEach(x => {
+    // O que o extrato dá fica guardado à parte, uma vez só.
+    if (!x._o) x._o = Object.fromEntries(CAMPOS_COMP.map(c => [c, +x[c] || 0]));
+    const aj = mapa.get(chaveProd(x)) || {}, txt = [];
+    COMPONENTES.forEach(([c, rot]) => {
+      x[c] = c in aj ? aj[c] : x._o[c];
+      if (ajustada(x, c)) txt.push(`${rot}: ${qt(x._o[c])} → ${qt(x[c])}`);
+    });
+    x.ajustes = txt.length;
+    x.ajustes_txt = txt.join('; ');
+    x.em_terceiros = TERCEIROS_COMP.reduce((s, c) => s + x[c], 0);
+    const posicao = x.saldo_erp + x.em_terceiros;
+    x.estoque_real = Math.max(posicao, 0);
+    x.falta_entrada = Math.max(-posicao, 0);
+    // Só o que foi marcado entra; negativo não é estoque.
+    x.considerado = Math.max(CAMPOS_COMP.reduce((s, c) => s + (escolhidos.has(c) ? x[c] : 0), 0), 0);
+    // Sem ajuste e com tudo marcado, vale o valor que o banco calculou: assim o
+    // rodapé fecha com o cartão do topo até o centavo.
+    x.valor_considerado = x.custo === null || x.custo === undefined || x.custo === '' ? null
+      : !x.ajustes && escolhidos.size === CAMPOS_COMP.length ? +x.valor_real
+      : Math.round(x.considerado * +x.custo * 100) / 100;
+  });
+  resumirComponentes();
+}
+
+const todosMarcados = () => escolhidos.size === CAMPOS_COMP.length;
+/** O título da coluna diz o que ela soma: "real" só quando soma tudo. */
+const rotuloCol = c => c.campo === 'considerado' && !todosMarcados() ? 'Estoque selecionado' : c.rotulo;
+
+function resumirComponentes() {
+  const xs = dados.produtos || [];
+  document.querySelectorAll('#componentes [data-comp]').forEach(i => i.checked = escolhidos.has(i.dataset.comp));
+  const so = todosMarcados() ? 'tudo'
+           : escolhidos.size === 1 && escolhidos.has('saldo_erp') ? 'erp'
+           : !escolhidos.has('saldo_erp') && TERCEIROS_COMP.every(c => escolhidos.has(c)) ? 'terceiros' : '';
+  document.querySelectorAll('#componentes [data-so]').forEach(b => b.classList.toggle('on', b.dataset.so === so));
+  const nomes = COMPONENTES.filter(([c]) => escolhidos.has(c)).map(c => c[1]);
+  const qtd = xs.reduce((s, x) => s + (x.considerado || 0), 0);
+  const valor = xs.reduce((s, x) => s + (+x.valor_considerado || 0), 0);
+  const prods = xs.filter(x => x.ajustes).length, celulas = xs.reduce((s, x) => s + (x.ajustes || 0), 0);
+  $('comp-resumo').innerHTML =
+    (nomes.length ? `Somando <b>${nomes.map(esc).join(' + ')}</b>: <b>${qt(qtd)} un</b> · <b>${money(valor)}</b>`
+                  : 'Nada marcado: marque ao menos um componente.') +
+    (todosMarcados() ? '' : ' — seleção parcial; a coluna passa a se chamar <i>Estoque selecionado</i>') +
+    (celulas ? ` · <b>${n(celulas)} quantidade(s) ajustada(s) à mão</b> em ${n(prods)} produto(s)` : '') +
+    (editando ? `<br>Digite a quantidade certa na célula e saia dela para gravar. Apagar o número
+                 (ou repetir o do extrato) desfaz o ajuste. O valor do extrato fica guardado.` : '');
+  $('editar').textContent = editando ? '✓ Concluir ajustes' : '✎ Ajustar quantidades';
+  $('editar').classList.toggle('on', editando);
+  $('desfazer').hidden = !ajustes.length;
+}
 const marcados = { nat: new Set(), tipo: new Set() };   // vazio = todos
 
 /* ------------------------------------------------------------------- resumo */
@@ -438,10 +557,18 @@ async function abrirAba(qual) {
 
   if (!dados[aba]) {
     $('tbl').querySelector('tbody').innerHTML = '<tr><td class="skel">carregando…</td></tr>';
-    try { dados[aba] = await api(def.rota + '?id=' + encodeURIComponent(arquivoId)); }
-    catch (e) { return falha(e); }
+    try {
+      const [linhas, aj] = await Promise.all([
+        api(def.rota + '?id=' + encodeURIComponent(arquivoId)),
+        qual === 'produtos' ? api('/api/real/ajustes?id=' + encodeURIComponent(arquivoId))
+                            : Promise.resolve(null)]);
+      dados[qual] = linhas;
+      if (aj) ajustes = aj;
+    } catch (e) { return falha(e); }
     if (aba !== qual) return;            // trocou de aba enquanto carregava
   }
+  $('componentes').hidden = aba !== 'produtos';
+  if (aba === 'produtos') recalcular();
   montarListas();
   desenhar(true);
 }
@@ -508,6 +635,7 @@ function filtrar() {
     if (sit && def.situacoes) {
       if (sit === 'problema') { if (x.situacao === 'ok') return false; }
       else if (sit === 'repetido') { if (!(+x.cadastros > 1)) return false; }
+      else if (sit === 'ajustado') { if (!x.ajustes) return false; }
       else if (x[campoSit] !== sit) return false;
     }
     if (tem('periodo') && ((de && x.dt < de) || (ate && x.dt > ate))) return false;
@@ -519,7 +647,7 @@ function filtrar() {
     if (tem('prazo') && !noPrazo(x.dias, prazo)) return false;
     if (tem('cura') && cura && x.coberta_natureza !== cura) return false;
     if (tem('min') && min && Math.abs(+x[def.qtd || 'estoque_real'] || 0) < min) return false;
-    if (tem('so_estoque') && $('f-so-estoque').checked && !(+x.estoque_real > 0)) return false;
+    if (tem('so_estoque') && $('f-so-estoque').checked && !(+x.considerado > 0)) return false;
     return true;
   });
 }
@@ -550,6 +678,23 @@ function porNota(xs, def) {
 
 /* ------------------------------------------------------------------ desenho */
 function celula(c, x) {
+  const v = x[c.campo];
+  // Componente do estoque: mostra o ajuste, e vira campo no modo de edição.
+  if (x._o && CAMPOS_COMP.includes(c.campo)) {
+    const aj = ajustada(x, c.campo);
+    const dica = aj ? ` title="No extrato do ERP: ${qt(x._o[c.campo])}"` : '';
+    if (editando) return `<td class="num" data-c="${c.campo}"><input class="aj${aj ? ' ajustado' : ''}"
+        type="number" step="any" data-campo="${c.campo}" value="${+v || 0}"${dica}
+        aria-label="${esc(c.rotulo)} de ${esc(x.cod_item)}"></td>`;
+    const z = +v || 0;
+    const cls = (aj ? ' ajustado' : '') + (c.sinal && z < 0 ? ' neg' : '');
+    return `<td class="num${cls}" data-c="${c.campo}"${dica}>${c.zero && !z && !aj ? vazio : qt(z)}</td>`;
+  }
+  if (DERIVADAS.includes(c.campo)) return celulaSimples(c, x).replace('<td', `<td data-c="${c.campo}"`);
+  return celulaSimples(c, x);
+}
+
+function celulaSimples(c, x) {
   const v = x[c.campo];
   if (c.chip) return `<td>${chip(c.chip, v)}</td>`;
   if (c.nat) return `<td>${esc(nat(v))}</td>`;
@@ -594,7 +739,7 @@ function desenhar(doInicio) {
   const t = $('tbl');
   t.querySelector('thead').innerHTML = '<tr>' + colunasVistas.map(c => `
     <th class="ord${c.tipo === 'numero' || c.tipo === 'dinheiro' ? ' num' : ''}${c.desc ? ' desc' : ''}"
-        data-campo="${c.campo}">${esc(c.rotulo)}${c.campo === campo
+        data-campo="${c.campo}">${esc(rotuloCol(c))}${c.campo === campo
           ? `<span class="seta">${dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`).join('') + '</tr>';
   const pedaco = xs.slice(0, mostradas);
   t.querySelector('tbody').innerHTML = pedaco.length
@@ -602,18 +747,7 @@ function desenhar(doInicio) {
         colunasVistas.map(c => celula(c, x)).join('') + '</tr>').join('')
     : `<tr><td colspan="${colunasVistas.length}" class="skel">nada com esses filtros</td></tr>`;
 
-  const velho = t.querySelector('tfoot'); if (velho) velho.remove();
-  if (xs.length) {
-    let primeiro = true;
-    t.insertAdjacentHTML('beforeend', '<tfoot><tr>' + colunasVistas.map(c => {
-      if (c.soma) {
-        const s = xs.reduce((a, x) => a + (+x[c.campo] || 0), 0);
-        return `<td class="num">${c.tipo === 'dinheiro' ? money(s) : qt(s)}</td>`;
-      }
-      if (primeiro) { primeiro = false; return `<td>${n(xs.length)}</td>`; }
-      return '<td></td>';
-    }).join('') + '</tr></tfoot>');
-  }
+  rodape();
 
   $('mais').hidden = xs.length <= mostradas;
   $('mais').textContent = `Mostrar mais ${n(Math.min(LOTE, xs.length - mostradas))} ` +
@@ -625,6 +759,22 @@ function desenhar(doInicio) {
               : `${n(xs.length)} linhas`) +
     (filtradas < total ? ` — filtrado de ${n(total)}` : '') +
     (xs.length > mostradas ? ` · mostrando ${n(mostradas)}; os totais e a exportação valem para todas` : '');
+}
+
+/** Totais de tudo o que o filtro deixou passar — não só do que está desenhado. */
+function rodape() {
+  const t = $('tbl'), xs = vistas;
+  const velho = t.querySelector('tfoot'); if (velho) velho.remove();
+  if (!xs.length) return;
+  let primeiro = true;
+  t.insertAdjacentHTML('beforeend', '<tfoot><tr>' + colunasVistas.map(c => {
+    if (c.soma) {
+      const s = xs.reduce((a, x) => a + (+x[c.campo] || 0), 0);
+      return `<td class="num">${c.tipo === 'dinheiro' ? money(s) : qt(s)}</td>`;
+    }
+    if (primeiro) { primeiro = false; return `<td>${n(xs.length)}</td>`; }
+    return '<td></td>';
+  }).join('') + '</tr></tfoot>');
 }
 
 /* ------------------------------------------------------- detalhe ao clicar */
@@ -692,6 +842,8 @@ $('tbl').querySelector('thead').onclick = e => {
   desenhar(true);
 };
 $('tbl').querySelector('tbody').onclick = e => {
+  // Ajustando quantidades, o clique é para digitar — não para abrir o Kardex.
+  if (editando && aba === 'produtos') return;
   const tr = e.target.closest('tr[data-i]');
   if (!tr) return;
   const x = vistas[+tr.dataset.i];
@@ -700,6 +852,77 @@ $('tbl').querySelector('tbody').onclick = e => {
   else if (x.cod_item) abrirKardex(x.cod_item, x.descr_item, x.seq);
 };
 $('mais').onclick = () => { mostradas += LOTE; desenhar(false); };
+
+/** Grava o ajuste de uma célula. Vazio, ou igual ao extrato, desfaz. */
+async function gravarAjuste(inp) {
+  const tr = inp.closest('tr[data-i]');
+  const x = tr && vistas[+tr.dataset.i], campo = inp.dataset.campo;
+  if (!x || !CAMPOS_COMP.includes(campo)) return;
+  const bruto = String(inp.value).trim().replace(',', '.');
+  const qtd = bruto === '' ? null : +bruto;
+  if (qtd !== null && !isFinite(qtd)) { inp.value = x[campo]; return; }
+  const desfaz = qtd === null || Math.abs(qtd - x._o[campo]) < 1e-9;
+  if (!desfaz && Math.abs(qtd - x[campo]) < 1e-9) return;        // nada mudou
+  if (desfaz && !ajustada(x, campo)) { inp.value = x._o[campo]; return; }
+  try {
+    const r = await apiPost('/api/real/ajustar', {
+      id: arquivoId, cod: x.cod_item, descr: x.descr_item || '', campo,
+      qtd: desfaz ? '' : qtd, qtd_original: x._o[campo] });
+    if (r && r.erro) throw new Error(r.erro);
+  } catch (err) {
+    inp.value = x[campo];
+    return falha(err);
+  }
+  const k = chaveProd(x);
+  ajustes = ajustes.filter(a => !(`${a.cod_item}\u0001${a.descr_item || ''}` === k && a.campo === campo));
+  if (!desfaz) ajustes.push({ cod_item: x.cod_item, descr_item: x.descr_item || '', campo,
+                              qtd, qtd_original: x._o[campo] });
+  recalcular();
+  // Só as células que dependem do número mudam: redesenhar a tabela inteira
+  // tiraria o cursor de quem está digitando na célula ao lado.
+  inp.value = x[campo];
+  inp.classList.toggle('ajustado', ajustada(x, campo));
+  inp.title = ajustada(x, campo) ? `No extrato do ERP: ${qt(x._o[campo])}` : '';
+  const def = ABAS.produtos;
+  DERIVADAS.forEach(c => {
+    const td = tr.querySelector(`td[data-c="${c}"]`), col = def.colunas.find(k2 => k2.campo === c);
+    if (td && col) td.outerHTML = celula(col, x);
+  });
+  rodape();
+}
+$('tbl').querySelector('tbody').onchange = e => {
+  if (e.target.classList && e.target.classList.contains('aj')) gravarAjuste(e.target);
+};
+
+/* O que entra na conta: marcar e desmarcar componentes. */
+function escolher(campos) {
+  escolhidos.clear();
+  campos.forEach(c => escolhidos.add(c));
+  try { localStorage.setItem('estoque_real_componentes', JSON.stringify([...escolhidos])); } catch (e) { /* ok */ }
+  recalcular();
+  desenhar(true);
+}
+$('componentes').onchange = e => {
+  if (!e.target.dataset || !e.target.dataset.comp) return;
+  const marcados2 = CAMPOS_COMP.filter(c =>
+    c === e.target.dataset.comp ? e.target.checked : escolhidos.has(c));
+  escolher(marcados2);
+};
+$('componentes').onclick = e => {
+  const so = e.target.dataset && e.target.dataset.so;
+  if (so) escolher(so === 'erp' ? ['saldo_erp'] : so === 'terceiros' ? TERCEIROS_COMP : CAMPOS_COMP);
+};
+$('editar').onclick = () => { editando = !editando; resumirComponentes(); desenhar(false); };
+$('desfazer').onclick = async () => {
+  if (!ajustes.length) return;
+  if (!confirm(`Desfazer os ${ajustes.length} ajuste(s) manuais deste extrato? ` +
+               'As quantidades voltam a ser as do ERP.')) return;
+  try { await apiPost('/api/real/desfazer-ajustes', { id: arquivoId }); }
+  catch (err) { return falha(err); }
+  ajustes = [];
+  recalcular();
+  desenhar(false);
+};
 
 let espera;
 const redesenhar = () => { clearTimeout(espera); espera = setTimeout(() => desenhar(true), 180); };
@@ -753,16 +976,24 @@ $('exportar').onclick = () => {
   painelExportar({
     titulo: 'Estoque real — ' + titulo,
     subtitulo: (a ? a.textContent.replace(/\s+/g, ' ').trim() : '') +
-               ` · ${n(vistas.length)} linhas` + (filtrar().length < total ? ' (com filtro)' : ''),
+               ` · ${n(vistas.length)} linhas` + (filtrar().length < total ? ' (com filtro)' : '') +
+               // O relatório circula sem a tela: o que foi somado e o que foi
+               // mexido à mão tem de estar escrito nele.
+               (aba === 'produtos'
+                 ? ` · soma: ${COMPONENTES.filter(([c]) => escolhidos.has(c)).map(c => c[1]).join(' + ') || 'nada'}` +
+                   (ajustes.length ? ` · ${n(ajustes.length)} quantidade(s) ajustada(s) à mão` : '')
+                 : ''),
     aba: titulo.slice(0, 28),
     colunas: colunasExport.map(c => ({
-      campo: c.chip || c.nat ? c.campo + '_txt' : c.campo, rotulo: c.rotulo,
-      tipo: c.tipo || 'texto', soma: !!c.soma, marcada: c.exp !== false })),
+      campo: c.chip || c.nat ? c.campo + '_txt' : c.campo, rotulo: rotuloCol(c),
+      tipo: c.tipo || 'texto', soma: !!c.soma,
+      // Havendo ajuste, a coluna que conta o que mudou sai marcada por padrão.
+      marcada: c.campo === 'ajustes_txt' ? ajustes.length > 0 : c.exp !== false })),
     // Situação e natureza saem por extenso: o código interno não diz nada a
     // quem recebe o relatório.
     linhas: vistas.map(x => {
       const l = { ...x };
-      delete l.linhas;
+      delete l.linhas; delete l._o;
       def.colunas.forEach(c => {
         if (c.chip) l[c.campo + '_txt'] = (c.chip[x[c.campo]] || [x[c.campo]])[0];
         if (c.nat) l[c.campo + '_txt'] = nat(x[c.campo]);

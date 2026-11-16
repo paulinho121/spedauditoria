@@ -355,6 +355,64 @@ def real_kardex(qs):
         f"and cod_item = {lit('cod')} and descr_item = {lit('descr')} order by seq")
 
 
+CAMPOS_AJUSTE = ("saldo_erp", "em_armazem", "em_locacao", "em_comodato",
+                 "em_demonstracao", "em_outros")
+
+
+def _ajuste_valido(body):
+    """
+    O ajuste que veio da tela, conferido. Quantidade vazia é pedido para
+    desfazer; qualquer outra coisa tem de ser número.
+    """
+    b = body or {}
+    campo = str(b.get("campo") or "")
+    if campo not in CAMPOS_AJUSTE:
+        raise ValueError("campo de ajuste desconhecido")
+    bruto = b.get("qtd")
+    qtd = None
+    if bruto not in (None, ""):
+        qtd = float(str(bruto).replace(",", "."))
+        if qtd != qtd or abs(qtd) > 1e9:
+            raise ValueError("quantidade inválida")
+    orig = b.get("qtd_original")
+    return {"arquivo_id": int(b.get("id") or 0), "cod_item": str(b.get("cod") or ""),
+            "descr_item": str(b.get("descr") or ""), "campo": campo, "qtd": qtd,
+            "qtd_original": None if orig in (None, "") else float(orig),
+            "observacao": (str(b.get("obs") or "").strip()[:300] or None)}
+
+
+def real_ajustes(qs):
+    """Os ajustes manuais do extrato: o que o auditor pôs no lugar do ERP."""
+    aid = _real_arquivo(qs)
+    if not aid:
+        return []
+    return query(
+        "select cod_item, descr_item, campo, qtd, qtd_original, observacao, "
+        "       ajustado_por, to_char(ajustado_em, 'DD/MM/YYYY HH24:MI') ajustado_em "
+        f"from erp_real_ajuste where arquivo_id = {aid} order by id")
+
+
+def real_ajustar(body):
+    import getpass
+    try:
+        a = _ajuste_valido(body)
+    except (ValueError, TypeError) as e:
+        msg = str(e)
+        return {"erro": msg if "ajuste" in msg or "inválida" in msg else "quantidade inválida"}
+    a["ajustado_por"] = os.environ.get("AUDITOR") or getpass.getuser()
+    lit = json.dumps(a, ensure_ascii=False).replace("'", "''")
+    r = query(f"select erp_real_ajustar('{lit}'::jsonb) r")[0]["r"]
+    _cache.clear()
+    return json.loads(r) if isinstance(r, str) else r
+
+
+def real_desfazer_ajustes(body):
+    aid = int((body or {}).get("id") or 0)
+    r = query(f"select erp_real_desfazer_ajustes({aid}) n")
+    _cache.clear()
+    return {"desfeitos": int(r[0]["n"]) if r else 0}
+
+
 def erp_saldos(qs):
     """Fotos do saldo do ERP já importadas, da mais recente para a mais antiga."""
     return query(
@@ -706,6 +764,8 @@ def trabalho_excluir(body):
 
 POSTS = {"/api/import/pasta": importar_pasta, "/api/import/upload": importar_upload,
          "/api/exportar": exportar,
+         "/api/real/ajustar": real_ajustar,
+         "/api/real/desfazer-ajustes": real_desfazer_ajustes,
          "/api/achados/status": mudar_status, "/api/varrer": rodar_varredura,
          "/api/trabalhos/usar": trabalho_usar, "/api/trabalhos/novo": trabalho_novo,
          "/api/trabalhos/excluir": trabalho_excluir}
@@ -813,6 +873,7 @@ ROUTES = {
     "/api/real/terceiros": _real_lista("erp_real_em_terceiros"),
     "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias"),
     "/api/real/kardex": real_kardex,
+    "/api/real/ajustes": real_ajustes,
     "/api/periodo/cfops": lambda qs: query(sql_conferencia_cfop(
         (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0])),
     "/api/periodo/cfop/itens": lambda qs: query(sql_conferencia_cfop_detalhe(
