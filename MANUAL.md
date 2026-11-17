@@ -583,9 +583,47 @@ o cadastro fiscal do produto nas saídas.
 - na **exportação** da aba *Por nota*, as mesmas colunas, para conferir contra a
   DI/DUIMP fora do sistema.
 
-*Diferença* é destacado − calculado: negativa, a nota destacou a menos. Fica em
-vermelho só o que passa da tolerância (R$ 1,00 ou 0,5%). A conferência é sempre
-da nota inteira, mesmo quando o filtro deixou só parte dos itens.
+*Não explicado* é a diferença que sobra depois do benefício (abaixo):
+negativa, a nota destacou a menos. Fica em vermelho só o que passa da tolerância
+(R$ 1,00 ou 0,5%). A conferência é sempre da nota inteira, mesmo quando o filtro
+deixou só parte dos itens.
+
+Na conta, a base de cada adição entra uma vez — o ERP a repete em todas as linhas
+da adição. Quando as linhas são **itens iguais** (mesma base e mesmo valor, cada
+um com a sua base), ela entra uma vez por item; a tela mostra *×2*, *×3* ao lado
+da base. O sistema decide pela razão base ÷ valor da linha, que fica perto de 1.
+
+**Benefício na importação (LPCO).** Mercadoria importada com LPCO que dá
+redução paga 10% do tributo, ou nada. O XML não traz a LPCO do item; o que ele
+traz é o valor que ela produziu. Por isso a adição é marcada como benefício
+quando:
+
+| Situação | O que a nota mostra |
+|---|---|
+| *benefício — pagou 10%* | destacado entre 8,5% e 11,5% do calculado; ou a própria alíquota já reduzida a 10% da normal (PIS 0,21%, COFINS 0,965%) |
+| *benefício — zero* | base cheia e nada destacado; ou alíquota zero com base |
+
+O **dispensado** é o tributo cheio menos o destacado — pela alíquota da nota, ou
+pela normal de PIS/COFINS-Importação (2,10% e 9,65%) quando a nota já declarou a
+reduzida. Ele sai da conta do *não fecha*: só o que não é nem integral nem
+benefício continua como alerta. Para o IPI, que não tem alíquota única (a TIPI é
+por NCM), o benefício só é reconhecido pelo valor. O II fica de fora: a maior
+parte das adições paga 90% da TEC, que é a redução geral, e sem a TEC de cada NCM
+não dá para separar benefício de alíquota normal.
+
+Onde ver:
+
+- **linhas em verde** na tabela, com o chip *PIS/COFINS 10%*, *PIS/COFINS zero*…
+  e a coluna *Dispensado*;
+- atalho **Com benefício (LPCO)**, filtro **Benefício** e o resumo **por benefício
+  na importação**;
+- cartão **Benefício na importação** com o total dispensado do que está filtrado;
+- na aba *Por nota*, colunas *IPI/PIS/COFINS benefício* e *não explicado*;
+- no detalhe do item, o cartão verde com o dispensado daquele item; no quadro
+  *Conferência da nota*, cada adição com a sua situação.
+
+O benefício é um indício forte, não a prova: confirme na DUIMP/DI a LPCO que deu
+direito à redução.
 
 ### Extrato do ERP — a versão do cliente da mesma história
 

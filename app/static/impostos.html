@@ -26,6 +26,21 @@ th.ord .seta { font-size: 10px; opacity: .8; margin-left: 3px; }
 tr.clic { cursor: pointer; }
 tr.clic:hover td { background: var(--surface-low); }
 tr.cancelada td { text-decoration: line-through; opacity: .55; }
+/* Benefício na importação: a linha inteira fica marcada, não só um chip. */
+tr.benef td { background: #e8f5ec; }
+tr.benef td:first-child { box-shadow: inset 4px 0 0 #2e8b57; }
+tr.benef:hover td { background: #d8eedf; }
+.chip.benef { background: #d4efdd; color: #1b5e37; font-weight: 700; }
+.card.benef { border-left: 4px solid #2e8b57; background: #f1faf4; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) tr.benef td { background: #17301f; }
+  :root:not([data-theme="light"]) tr.benef:hover td { background: #1d3b27; }
+  :root:not([data-theme="light"]) .chip.benef { background: #1f4a2e; color: #bfe8cc; }
+  :root:not([data-theme="light"]) .card.benef { background: #14261a; }
+}
+:root[data-theme="dark"] tr.benef td { background: #17301f; }
+:root[data-theme="dark"] .chip.benef { background: #1f4a2e; color: #bfe8cc; }
+:root[data-theme="dark"] .card.benef { background: #14261a; }
 td.forte { font-weight: 700; }
 td.neg { color: var(--error); font-weight: 700; }
 .conf table { font-size: 13px; }
@@ -91,6 +106,7 @@ td.neg { color: var(--error); font-weight: 700; }
     <button data-atalho="difal">Com DIFAL</button>
     <button data-atalho="st">Com ICMS-ST</button>
     <button data-atalho="alerta">Com alerta</button>
+    <button data-atalho="beneficio">Com benefício (LPCO)</button>
     <button data-atalho="sem_detalhe">Sem detalhe de imposto</button>
   </div>
 
@@ -126,6 +142,7 @@ td.neg { color: var(--error); font-weight: 700; }
       <option value="operacao">por tipo de operação</option>
       <option value="nat_op">por natureza da operação</option>
       <option value="orig">por origem da mercadoria</option>
+      <option value="beneficio">por benefício na importação</option>
     </select>
     <button id="exportar" style="margin-left:auto">Exportar ↓</button>
   </div>
@@ -149,6 +166,9 @@ const $ = id => document.getElementById(id);
 const LOTE = 300;
 const vazio = '<span class="muted">—</span>';
 const nada = v => v === null || v === undefined || v === '';
+/** A coluna tem o que mostrar nesta linha? Número diferente de zero; texto preenchido. */
+const preenchida = (c, x) => c.benef ? !nada(x[c.campo])
+  : !!(+x[c.campo] || (c.sinal && !nada(x[c.campo])));
 const pc = v => nada(v) ? '—' : (+v).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + '%';
 const qt = v => (+v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 
@@ -180,8 +200,8 @@ const EXPLICA_ALERTA = {
     contra a DI/DUIMP. O quadro <i>Conferência da nota</i>, logo abaixo, mostra o
     calculado, o destacado e a diferença, adição por adição.`,
   importacao_pis_cofins_nao_fecha: `PIS/COFINS-Importação destacado na nota não fecha
-    com base × alíquota, nem somando a nota inteira. Em muitas linhas a nota traz base
-    e alíquota com valor zero. Conferir contra o que foi pago na DI/DUIMP — é esse o
+    com base × alíquota, nem somando a nota inteira, mesmo depois de separar as adições
+    com benefício (10% ou zero). O que sobra não é integral nem benefício. Conferir contra o que foi pago na DI/DUIMP — é esse o
     valor que dá direito a crédito. O quadro <i>Conferência da nota</i>, logo abaixo,
     mostra o calculado, o destacado e a diferença, adição por adição.`,
   cst_tributado_sem_icms: `CST 00, 10 ou 20 diz que a operação é tributada, mas a
@@ -207,7 +227,8 @@ const TRIB = [
   ['icms_v', 'ICMS'], ['st_v', 'ICMS-ST'], ['fcp_v', 'FCP'], ['difal_v', 'DIFAL'],
   ['ipi_v', 'IPI'], ['ii_v', 'II'], ['pis_v', 'PIS'], ['cofins_v', 'COFINS'], ['ibscbs_v', 'IBS/CBS'],
 ];
-const SOMAS = ['v_oper', 'tributos', 'icms_deson'].concat(TRIB.map(t => t[0]));
+const SOMAS = ['v_oper', 'tributos', 'icms_deson', 'dispensado', 'pis_dispensado',
+               'cofins_dispensado', 'ipi_dispensado'].concat(TRIB.map(t => t[0]));
 
 /* -------------------------------------------------------------- as facetas
    Cada faceta é uma lista de marcar. A contagem ao lado de cada opção é a dos
@@ -225,12 +246,14 @@ const FACETAS = [
     val: l => { const t = TRIB.filter(([c]) => +l[c] > 0).map(x => x[1]); return t.length ? t : ['nenhum']; } },
   { id: 'ncm', rot: 'NCM', val: l => l.ncm || '—', nome: v => v + (DESC_DO_NCM[v] ? ' · ' + DESC_DO_NCM[v] : '') },
   { id: 'uf', rot: 'UF da outra parte', val: l => l.part_uf || '—' },
+  { id: 'beneficio', rot: 'Benefício', val: l => l.beneficio || 'sem benefício',
+    ordem: v => v === 'sem benefício' ? 1e9 : -(CONTA_BENEF[v] || 0) },
   { id: 'alerta', rot: 'Alerta', multi: true,
     val: l => (l.alertas && l.alertas.length) ? l.alertas : ['nenhum'],
     nome: v => v === 'nenhum' ? 'Sem alerta' : (ALERTAS[v] || v) },
 ];
 const marcadas = Object.fromEntries(FACETAS.map(f => [f.id, new Set()]));
-let NAT_DO_CFOP = {}, DESC_DO_NCM = {}, ALERTAS = {};
+let NAT_DO_CFOP = {}, DESC_DO_NCM = {}, ALERTAS = {}, CLASSES = {}, IMPORTACOES = {}, CONTA_BENEF = {};
 
 /* ------------------------------------------------------------------- estado */
 let todas = [], resumoGeral = null, aba = 'itens';
@@ -241,6 +264,9 @@ async function carregar() {
   let r;
   try { r = await api('/api/impostos'); } catch (e) { return falha(e); }
   ALERTAS = r.alertas || {};
+  CLASSES = r.classes || {};
+  // A conta da importação, adição por adição, como o servidor fez.
+  IMPORTACOES = r.importacoes || {};
   resumoGeral = r.resumo || {};
   todas = (r.itens || []).map(l => {
     l.alertas = l.alertas || [];
@@ -262,6 +288,8 @@ async function carregar() {
       [k, Object.entries(c).sort((a, b) => b[1] - a[1])[0][0].slice(0, 40)]));
   };
   NAT_DO_CFOP = cont('nat_op', 'cfop');
+  CONTA_BENEF = {};
+  todas.forEach(l => { if (l.beneficio) CONTA_BENEF[l.beneficio] = (CONTA_BENEF[l.beneficio] || 0) + 1; });
   DESC_DO_NCM = cont('descr', 'ncm');
   montarFacetas();
   desenhar(true);
@@ -383,6 +411,7 @@ const ATALHOS = {
   st: { tributo: ['ICMS-ST'] },
   alerta: { alerta: () => Object.keys(ALERTAS).filter(k => k !== 'sem_detalhe') },
   sem_detalhe: { alerta: ['sem_detalhe'] },
+  beneficio: { beneficio: () => [...new Set(todas.map(l => l.beneficio).filter(Boolean))] },
 };
 $('atalhos').onclick = e => {
   const b = e.target.closest('button[data-atalho]');
@@ -414,6 +443,13 @@ function kpis(xs) {
     if (Math.abs(t[c]) > 0.004) cards.push(card(r, money(t[c]), pp(t[c])));
   });
   if (t.icms_deson > 0.004) cards.push(card('ICMS desonerado', money(t.icms_deson), 'informado, não somado nos tributos'));
+  if (t.dispensado > 0.004) {
+    const comB = xs.filter(l => l.beneficio);
+    cards.push(card('Benefício na importação', money(t.dispensado),
+      `${n(comB.length)} itens em ${n(new Set(comB.map(l => l.nfe_id)).size)} notas · PIS ` +
+      `${money(t.pis_dispensado)} · COFINS ${money(t.cofins_dispensado)}` +
+      (t.ipi_dispensado > 0.004 ? ` · IPI ${money(t.ipi_dispensado)}` : ''), 'benef'));
+  }
   $('kpis').innerHTML = cards.join('');
 
   // Item sem detalhe não tem imposto para somar: o total está incompleto.
@@ -457,6 +493,8 @@ const COL_TRIB = [
   aliq('cofins_p', 'Alíq. COFINS', { det: true }),
   dinheiro('cofins_v', 'COFINS'),
   dinheiro('ibscbs_v', 'IBS/CBS', { auto: true }),
+  { campo: 'beneficio', rotulo: 'Benefício', benef: true, auto: true },
+  dinheiro('dispensado', 'Dispensado', { auto: true }),
   dinheiro('tributos', 'Total tributos', { forte: true }),
   aliq('carga', 'Carga'),
 ];
@@ -496,13 +534,16 @@ const COLUNAS = {
     // importação no filtro.
     dinheiro('nota_ipi_calc', 'IPI calculado', { auto: true }),
     dinheiro('nota_ipi_dest', 'IPI destacado', { auto: true }),
-    dinheiro('dif_ipi', 'Dif. IPI', { auto: true, sinal: true, fecha: 'ipi' }),
+    dinheiro('nota_ipi_dispensado', 'IPI benefício', { auto: true }),
+    dinheiro('dif_ipi', 'IPI não explicado', { auto: true, sinal: true, fecha: 'ipi' }),
     dinheiro('nota_pis_calc', 'PIS calculado', { auto: true }),
     dinheiro('nota_pis_dest', 'PIS destacado', { auto: true }),
-    dinheiro('dif_pis', 'Dif. PIS', { auto: true, sinal: true, fecha: 'pis' }),
+    dinheiro('nota_pis_dispensado', 'PIS benefício', { auto: true }),
+    dinheiro('dif_pis', 'PIS não explicado', { auto: true, sinal: true, fecha: 'pis' }),
     dinheiro('nota_cofins_calc', 'COFINS calculada', { auto: true }),
     dinheiro('nota_cofins_dest', 'COFINS destacada', { auto: true }),
-    dinheiro('dif_cofins', 'Dif. COFINS', { auto: true, sinal: true, fecha: 'cofins' }),
+    dinheiro('nota_cofins_dispensado', 'COFINS benefício', { auto: true }),
+    dinheiro('dif_cofins', 'COFINS não explicado', { auto: true, sinal: true, fecha: 'cofins' }),
     { campo: 'alertas', rotulo: 'Alertas', alertas: true },
     { campo: 'nat_op', rotulo: 'Natureza', det: true, corta: 30 },
     { campo: 'chave', rotulo: 'Chave', det: true, mono: true, exp: false },
@@ -513,7 +554,7 @@ const COLUNAS = {
     { campo: 'itens', rotulo: 'Itens', tipo: 'numero', soma: true },
     { campo: 'notas', rotulo: 'Notas', tipo: 'numero' },
     dinheiro('v_oper', 'Valor'),
-    ...COL_TRIB.filter(c => c.tipo !== 'pct' && c.soma !== false),
+    ...COL_TRIB.filter(c => c.tipo !== 'pct' && c.soma !== false && !c.benef),
     aliq('carga', 'Carga'),
   ],
   alertas: [
@@ -542,6 +583,7 @@ const EXPLICA = {
 /* ------------------------------------------------------------------ desenho */
 function celula(c, x) {
   const v = x[c.campo];
+  if (c.benef) return `<td>${v ? `<span class="chip benef" title="${esc(String(v))}">${esc(String(v))}</span>` : vazio}</td>`;
   if (c.alertas) {
     const a = (v || []).filter(k => k !== 'sem_detalhe');
     if ((v || []).includes('sem_detalhe')) return `<td><span class="chip">sem detalhe</span></td>`;
@@ -583,14 +625,20 @@ function porNota(xs) {
     g.carga = g.v_oper > 0 ? 100 * g.tributos / g.v_oper : null;
     // A conferência da importação vem pronta do servidor, igual em toda linha
     // da nota, e vale para a nota inteira — não só para os itens filtrados.
-    const l0 = g.linhas[0];
-    ['ipi', 'pis', 'cofins'].forEach(t => {
-      if (nada(l0['nota_' + t + '_calc']) && nada(l0['nota_' + t + '_dest'])) return;
-      g['nota_' + t + '_calc'] = +l0['nota_' + t + '_calc'] || 0;
-      g['nota_' + t + '_dest'] = +l0['nota_' + t + '_dest'] || 0;
-      g['dif_' + t] = Math.round((g['nota_' + t + '_dest'] - g['nota_' + t + '_calc']) * 100) / 100;
-      g['fecha_' + t] = fecha(g['nota_' + t + '_calc'], g['nota_' + t + '_dest']);
+    const conta = IMPORTACOES[g.nfe_id];
+    if (conta) ['ipi', 'pis', 'cofins'].forEach(t => {
+      const c = conta[t];
+      if (!c || (!c.calc && !c.dest)) return;
+      g['nota_' + t + '_calc'] = c.calc;
+      g['nota_' + t + '_dest'] = c.dest;
+      g['nota_' + t + '_dispensado'] = c.dispensado || undefined;
+      // A diferença que o benefício não explica — é ela que pede conferência.
+      g['dif_' + t] = c.nao_explicado;
+      g['fecha_' + t] = c.fecha;
     });
+    const bens = [...new Set(g.linhas.map(l => l.beneficio).filter(Boolean))];
+    g.beneficio = bens.join('; ') || undefined;
+    g.itens_benef = g.linhas.filter(l => l.beneficio).length;
     return g;
   });
 }
@@ -607,6 +655,7 @@ const GRUPOS = {
   operacao: { val: l => l.operacao, rot: v => OPERACAO[v] || '', faceta: 'operacao' },
   nat_op: { val: l => l.nat_op || '—', rot: () => '' },
   orig: { val: l => nada(l.orig) ? '—' : String(l.orig), rot: v => ORIGEM[v] || '' },
+  beneficio: { val: l => l.beneficio || 'sem benefício', rot: () => '', faceta: 'beneficio' },
 };
 
 function porGrupo(xs, dim) {
@@ -647,7 +696,7 @@ function desenhar(doInicio) {
          : porAlerta(filtradas);
   const detalhe = $('f-detalhe').checked;
   // Coluna de tributo zerada em tudo o que foi filtrado não ocupa a tela.
-  const temValor = c => xs.some(x => +x[c.campo] || (c.sinal && !nada(x[c.campo])));
+  const temValor = c => xs.some(x => preenchida(c, x));
   colunasVistas = COLUNAS[aba].filter(c => (!c.det || detalhe) && (!c.auto || temValor(c)));
 
   const [campo, dir] = ordem[aba];
@@ -668,7 +717,7 @@ function desenhar(doInicio) {
           ? `<span class="seta">${dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`).join('') + '</tr>';
   const pedaco = xs.slice(0, mostradas);
   t.querySelector('tbody').innerHTML = pedaco.length
-    ? pedaco.map((x, i) => `<tr class="clic${x.situacao === 'cancelada' ? ' cancelada' : ''}" data-i="${i}">` +
+    ? pedaco.map((x, i) => `<tr class="clic${x.situacao === 'cancelada' ? ' cancelada' : ''}${x.beneficio && aba !== 'resumo' ? ' benef' : ''}" data-i="${i}">` +
         colunasVistas.map(c => celula(c, x)).join('') + '</tr>').join('')
     : `<tr><td colspan="${colunasVistas.length}" class="skel">nada com esses filtros</td></tr>`;
 
@@ -723,62 +772,79 @@ const p$ = v => nada(v) ? '' : pc(v);
  * aparece por adição — é ali que se acha a linha que está errada.
  */
 const TRIB_IMP = [['ipi', 'IPI'], ['pis', 'PIS'], ['cofins', 'COFINS']];
-const fecha = (calc, dest) => Math.abs(calc - dest) <= Math.max(1, Math.abs(dest) * 0.005);
-
-function contaImportacao(nfe_id) {
-  const ls = todas.filter(x => x.nfe_id === nfe_id && String(x.cfop || '').startsWith('3') && x.tem_detalhe);
-  if (!ls.length) return null;
-  return TRIB_IMP.map(([t, rot]) => {
-    const adicoes = new Map();
-    let soltas = 0, soltasItens = [];
-    ls.forEach(l => {
-      const b = l[t + '_vbc'], a = l[t + '_p'], v = +l[t + '_v'] || 0;
-      if (nada(b) || nada(a)) { if (v) { soltas += v; soltasItens.push(l.n_item); } return; }
-      const k = `${b}|${a}`;
-      let x = adicoes.get(k);
-      if (!x) { x = { base: +b, aliq: +a, calc: +b * +a / 100, dest: 0, itens: [] }; adicoes.set(k, x); }
-      x.dest += v; x.itens.push(l.n_item);
-    });
-    const lista = [...adicoes.values()].sort((p, q) => Math.abs(q.dest - q.calc) - Math.abs(p.dest - p.calc));
-    const calc = lista.reduce((s, x) => s + x.calc, 0);
-    const dest = lista.reduce((s, x) => s + x.dest, 0) + soltas;
-    return { t, rot, calc, dest, dif: dest - calc, fecha: fecha(calc, dest), adicoes: lista, soltas, soltasItens };
-  });
-}
-
 const itensTxt = xs => xs.length > 8 ? `${xs.slice(0, 8).join(', ')} … (+${xs.length - 8})` : xs.join(', ');
+const CLASSE_CHIP = { integral: 'ok', beneficio_10: 'benef', beneficio_zero: 'benef', nao_fecha: 'err' };
 
 function conferenciaImportacao(nfe_id) {
-  const conta = contaImportacao(nfe_id);
-  if (!conta || conta.every(c => !c.calc && !c.dest)) return '';
-  const dif = (v, ok) => `<td class="num${ok ? '' : ' neg'}">${money(v)}</td>`;
+  const conta = IMPORTACOES[nfe_id];
+  if (!conta || TRIB_IMP.every(([t]) => !conta[t] || (!conta[t].calc && !conta[t].dest))) return '';
+  const vermelho = (v, ok) => `<td class="num${ok ? '' : ' neg'}">${money(v)}</td>`;
+  const chipCl = (cl, via) => `<span class="chip ${CLASSE_CHIP[cl] || ''}">${esc(CLASSES[cl] || cl)}</span>` +
+    (via === 'aliquota' ? ' <span class="muted" style="font-size:11px">pela alíquota</span>' : '');
+  const tem = TRIB_IMP.filter(([t]) => conta[t] && (conta[t].calc || conta[t].dest));
+  const algumBenef = tem.some(([t]) => conta[t].dispensado > 0.004);
   return `<div class="card conf" style="margin-bottom:12px;border-left:4px solid var(--primary)">
     <div class="lbl">Conferência da nota (importação)</div>
     <p class="muted" style="font-size:12.5px;margin:6px 0 8px;line-height:1.5">
-      <b>Calculado</b> = base × alíquota de cada adição, com a base contada uma vez
-      (o ERP a repete em todas as linhas da adição). <b>Destacado</b> = o que as linhas
-      da nota trouxeram. <b>Diferença</b> = destacado − calculado: negativa, a nota
-      destacou a menos. Tolerância: R$ 1,00 ou 0,5%.</p>
+      <b>Calculado</b> = base × alíquota de cada adição (o ERP repete a base da adição em
+      todas as linhas dela; itens iguais contam uma vez cada). <b>Destacado</b> = o que as
+      linhas da nota trouxeram. <b>Benefício</b> = o tributo que deixou de ser pago nas
+      adições em que a nota destacou 10% ou zero (pelo valor ou pela própria alíquota,
+      contra a normal de 2,10% / 9,65%). <b>Não explicado</b> = a diferença que sobra
+      depois do benefício: negativa, a nota destacou a menos. Tolerância: R$ 1,00 ou 0,5%.</p>
     <div class="wrap"><table><thead><tr><th>Tributo</th><th class="num">Calculado</th>
-      <th class="num">Destacado</th><th class="num">Diferença</th><th>Situação</th></tr></thead><tbody>` +
-    conta.map(c => `<tr><td><b>${c.rot}</b></td><td class="num">${money(c.calc)}</td>
-      <td class="num">${money(c.dest)}</td>${dif(c.dif, c.fecha)}
-      <td class="${c.fecha ? 'ok' : 'neg'}">${c.fecha ? 'fecha' : 'não fecha'}</td></tr>`).join('') +
+      <th class="num">Destacado</th><th class="num">Benefício</th><th class="num">Não explicado</th>
+      <th>Situação</th></tr></thead><tbody>` +
+    tem.map(([t, rot]) => {
+      const c = conta[t];
+      return `<tr><td><b>${rot}</b></td><td class="num">${money(c.calc)}</td>
+        <td class="num">${money(c.dest)}</td>
+        <td class="num">${c.dispensado > 0.004 ? `<span class="chip benef">${money(c.dispensado)}</span>` : vazio}</td>
+        ${vermelho(c.nao_explicado, c.fecha)}
+        <td class="${c.fecha ? 'ok' : 'neg'}">${c.fecha ? (c.dispensado > 0.004 ? 'fecha com benefício' : 'fecha') : 'não fecha'}</td></tr>`;
+    }).join('') +
     `</tbody></table></div>` +
-    conta.filter(c => c.adicoes.length || c.soltas).map(c => `<details${c.fecha ? '' : ' open'}>
-      <summary>${c.rot}: ${n(c.adicoes.length)} adição(ões) — onde está a diferença</summary>
+    (algumBenef ? `<p style="font-size:12.5px;margin:8px 0 0;line-height:1.5"><span class="chip benef">benefício</span>
+      Confirmar na DUIMP/DI a LPCO que dá direito à redução: o XML não traz a LPCO do item,
+      só o valor que ela produziu.</p>` : '') +
+    tem.map(([t, rot]) => {
+      const c = conta[t];
+      const ruins = c.adicoes.filter(a => a.classe !== 'integral').length;
+      return `<details${c.fecha && !c.dispensado ? '' : ' open'}>
+      <summary>${rot}: ${n(c.adicoes.length)} adição(ões)${ruins ? ` — ${n(ruins)} fora do integral` : ''}</summary>
       <div class="wrap" style="margin-top:6px"><table><thead><tr>
-        <th class="num">Base da adição</th><th class="num">Alíquota</th><th class="num">Calculado</th>
-        <th class="num">Destacado nas linhas</th><th class="num">Diferença</th><th>Itens da nota</th>
+        <th class="num">Base</th><th class="num">Alíquota</th><th class="num">Calculado</th>
+        <th class="num">Destacado</th><th class="num">Benefício</th><th class="num">Diferença</th>
+        <th>Situação</th><th>Itens da nota</th>
       </tr></thead><tbody>` +
-      c.adicoes.map(x => `<tr><td class="num">${money(x.base)}</td><td class="num">${pc(x.aliq)}</td>
-        <td class="num">${money(x.calc)}</td><td class="num">${money(x.dest)}</td>${dif(x.dest - x.calc, fecha(x.calc, x.dest))}
-        <td class="mono">${esc(itensTxt(x.itens))}</td></tr>`).join('') +
+      c.adicoes.map(a => `<tr${a.classe.startsWith('beneficio') ? ' class="benef"' : ''}>
+        <td class="num">${money(a.base)}${a.vezes > 1 ? ` <span class="muted" title="itens iguais: a base conta uma vez por item">×${a.vezes}</span>` : ''}</td>
+        <td class="num">${pc(a.aliq)}</td><td class="num">${money(a.calc)}</td><td class="num">${money(a.dest)}</td>
+        <td class="num">${a.dispensado > 0.004 ? money(a.dispensado) : vazio}</td>
+        ${vermelho(a.dif, a.classe !== 'nao_fecha')}
+        <td>${chipCl(a.classe, a.via)}</td>
+        <td class="mono">${esc(itensTxt(a.itens))}</td></tr>`).join('') +
       (c.soltas ? `<tr><td colspan="3" class="muted">sem base ou alíquota informada</td>
-        <td class="num">${money(c.soltas)}</td>${dif(c.soltas, false)}<td class="mono">${esc(itensTxt(c.soltasItens))}</td></tr>` : '') +
+        <td class="num">${money(c.soltas)}</td><td></td>${vermelho(c.soltas, false)}<td></td>
+        <td class="mono">${esc(itensTxt(c.soltas_itens || []))}</td></tr>` : '') +
       `</tbody><tfoot><tr><td colspan="2">Total</td><td class="num">${money(c.calc)}</td>
-        <td class="num">${money(c.dest)}</td>${dif(c.dif, c.fecha)}<td></td></tr></tfoot></table></div></details>`).join('') +
+        <td class="num">${money(c.dest)}</td><td class="num">${c.dispensado > 0.004 ? money(c.dispensado) : ''}</td>
+        ${vermelho(c.dif, true)}<td></td><td></td></tr></tfoot></table></div></details>`;
+    }).join('') +
     `</div>`;
+}
+
+/** O cartão verde do item com benefício, no topo do detalhe. */
+function cartaoBeneficio(l) {
+  if (!l.beneficio) return '';
+  const partes = TRIB_IMP.filter(([t]) => +l[t + '_dispensado'] > 0)
+    .map(([t, rot]) => `${rot} ${money(l[t + '_dispensado'])} (${esc(CLASSES[l[t + '_classe']] || '')})`);
+  return `<div class="card benef" style="margin-bottom:12px">
+    <div class="lbl">Item com benefício na importação</div>
+    <p style="margin:8px 0 0;font-size:14px;line-height:1.6"><span class="chip benef">${esc(l.beneficio)}</span>
+      Tributo dispensado neste item: <b>${money(l.dispensado)}</b>${partes.length ? ' — ' + partes.join(' · ') : ''}.
+      O valor é a parte do item no benefício da adição, pelo valor da linha. Confirmar na
+      DUIMP/DI a LPCO que deu direito à redução.</p></div>`;
 }
 
 function abrirItem(l) {
@@ -786,7 +852,8 @@ function abrirItem(l) {
     `${brDate(l.dt)} · ${esc(FLUXO[l.fluxo] || '')} · ${esc(l.part_nome || '')}`);
   const al = l.alertas.map(k => `<div style="margin:0 0 8px"><span class="chip warn">${esc(ALERTAS[k] || k)}</span>
       <div class="muted" style="font-size:12.5px;margin-top:4px;line-height:1.5">${(EXPLICA_ALERTA[k] || '').replace(/\s+/g, ' ')}</div></div>`).join('');
-  p.corpo.innerHTML = (al ? `<div class="card alert" style="margin-bottom:12px">${al}</div>` : '') +
+  p.corpo.innerHTML = cartaoBeneficio(l) +
+    (al ? `<div class="card alert" style="margin-bottom:12px">${al}</div>` : '') +
     conferenciaImportacao(l.nfe_id) +
     `<div class="det">` +
     bloco('Item', [
@@ -830,6 +897,9 @@ function abrirItem(l) {
       linhaDet('CST PIS', esc(l.pis_cst)), linhaDet('Base PIS', m$(l.pis_vbc)), linhaDet('Alíquota PIS', p$(l.pis_p)),
       linhaDet('PIS', m$(l.pis_v)), linhaDet('CST COFINS', esc(l.cofins_cst)), linhaDet('Base COFINS', m$(l.cofins_vbc)),
       linhaDet('Alíquota COFINS', p$(l.cofins_p)), linhaDet('COFINS', m$(l.cofins_v)),
+      linhaDet('Situação do PIS na adição', esc(CLASSES[l.pis_classe] || '')),
+      linhaDet('Situação da COFINS na adição', esc(CLASSES[l.cofins_classe] || '')),
+      linhaDet('PIS dispensado', m$(l.pis_dispensado)), linhaDet('COFINS dispensada', m$(l.cofins_dispensado)),
     ]) +
     bloco('IBS / CBS', [linhaDet('CST', esc(l.ibscbs_cst)), linhaDet('IBS', m$(l.ibs_v)), linhaDet('CBS', m$(l.cbs_v))]) +
     bloco('Total', [linhaDet('Tributos destacados', m$(l.tributos)), linhaDet('Carga sobre o valor', p$(l.carga))]) +
@@ -845,8 +915,8 @@ function abrirNota(g) {
   const p = abrirPainel(`Nota ${esc(g.nota)}`,
     `${brDate(g.dt)} · ${esc(FLUXO[g.fluxo] || '')} · ${esc(g.part_nome || '')} · ${esc(g.nat_op || '')}`);
   const cols = COLUNAS.itens.filter(c => ['n_item', 'cod', 'descr', 'ncm', 'cfop', 'cst', 'v_oper', 'icms_p', 'icms_v',
-    'st_v', 'difal_v', 'ipi_v', 'ii_v', 'pis_v', 'cofins_v', 'tributos', 'alertas'].includes(c.campo))
-    .filter(c => !c.auto || g.linhas.some(x => +x[c.campo]));
+    'st_v', 'difal_v', 'ipi_v', 'ii_v', 'pis_v', 'cofins_v', 'beneficio', 'dispensado', 'tributos', 'alertas'].includes(c.campo))
+    .filter(c => !c.auto || g.linhas.some(x => preenchida(c, x)));
   const tot = totais(g.linhas);
   p.corpo.innerHTML = conferenciaImportacao(g.nfe_id) +
     `<p class="muted" style="font-size:13px;margin:0 0 10px">${n(g.linhas.length)} item(ns) · valor
@@ -925,7 +995,7 @@ $('exportar').onclick = () => {
   if ($('f-de').value || $('f-ate').value) filtros.push(`${$('f-de').value ? brDate($('f-de').value) : '…'} a ${$('f-ate').value ? brDate($('f-ate').value) : '…'}`);
   FACETAS.forEach(f => { if (marcadas[f.id].size) filtros.push(`${f.rot}: ${[...marcadas[f.id]].map(v => (f.nome || (x => x))(v)).join(', ')}`); });
   if ($('q').value.trim()) filtros.push(`busca "${$('q').value.trim()}"`);
-  const todasCols = COLUNAS[aba].filter(c => !c.auto || vistas.some(x => +x[c.campo]));
+  const todasCols = COLUNAS[aba].filter(c => !c.auto || vistas.some(x => preenchida(c, x)));
   painelExportar({
     titulo: rot,
     subtitulo: `${n(vistas.length)} linhas` + (filtros.length ? ' · ' + filtros.join(' · ') : ' · sem filtro'),

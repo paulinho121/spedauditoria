@@ -26,6 +26,13 @@ E confere o que dá para conferir sem inventar regra:
   · a alíquota fora do padrão do próprio NCM: o mesmo NCM, na mesma operação,
     com alíquota diferente da que ele tem em quase todas as outras notas.
 
+E evidencia o BENEFÍCIO na importação. Mercadoria importada com LPCO que dá
+redução paga 10% do tributo, ou nada. O XML não traz a LPCO do item; o que ele
+traz é o valor: numa adição com base e alíquota cheias, o destacado é 10% do
+calculado, ou zero. A adição nessa situação é marcada como benefício — com o
+tributo que deixou de ser pago — e sai da conta do "não fecha". Só o que não é
+nem integral nem benefício continua como divergência.
+
 Nada aqui é recalculado no lugar do destacado: o que a nota trouxe é o que
 aparece. A conferência só aponta.
 
@@ -55,6 +62,7 @@ ALERTAS = {
     "cst_isento_com_icms": "CST sem destaque (40, 41, 50, 60) com ICMS destacado",
     "importacao_ipi_nao_fecha": "Importação: IPI da nota não fecha com base × alíquota",
     "importacao_pis_cofins_nao_fecha": "Importação: PIS/COFINS da nota não fecha com base × alíquota",
+    "importacao_beneficio_parcial": "Importação: benefício em parte do tributo — confirmar a LPCO",
     "interestadual_importado": "Importado para outra UF com alíquota diferente de 4%",
     "interestadual_nacional": "Nacional para outra UF fora de 7% / 12%",
     "sem_difal": "Venda a não contribuinte de outra UF sem DIFAL",
@@ -116,7 +124,7 @@ def aliquota_interestadual(uf_orig, uf_dest, origem):
     return 12.0
 
 
-def monta(notas, itens, impostos, filiais):
+def monta(notas, itens, impostos, filiais, com_contas=False):
     """
     notas, itens, impostos: linhas de nfe, nfe_item e nfe_item_imposto.
     filiais: linhas de estabelecimento (cnpj, nome, uf).
@@ -188,7 +196,7 @@ def monta(notas, itens, impostos, filiais):
         l["alertas"] = _alertas(l)
         linhas.append(l)
 
-    _importacao_por_nota(linhas)
+    contas = _importacao_por_nota(linhas)
     _fora_do_padrao(linhas, "icms_p", "aliquota_icms_fora_do_ncm",
                     lambda l: (l["ncm"], l["fluxo"], l["operacao"],
                                str(l["orig"] or "") in ORIGEM_IMPORTADA, l["cfop"][:1]),
@@ -198,6 +206,8 @@ def monta(notas, itens, impostos, filiais):
                     lambda l: (l["ipi_v"] or 0) > 0)
 
     linhas.sort(key=lambda l: (l["dt"], str(l["num"] or ""), l["n_item"] or 0))
+    if com_contas:
+        return linhas, contas
     return linhas
 
 
@@ -231,33 +241,179 @@ def _alertas(l):
     return a
 
 
+# Situação de cada adição da importação, pela razão destacado ÷ calculado.
+CLASSES = {
+    "integral": "integral",
+    "beneficio_10": "benefício — pagou 10%",
+    "beneficio_zero": "benefício — zero",
+    "nao_fecha": "não fecha",
+}
+TRIBUTOS_IMPORTACAO = ("ipi", "pis", "cofins")
+# Alíquota normal de PIS/COFINS-Importação (Lei 10.865/2004, art. 8º). O
+# benefício também aparece na própria nota como alíquota de 10% dela (0,21% e
+# 0,965%) ou zero; o dispensado se mede contra a normal. O IPI não tem uma
+# alíquota só — a TIPI é por NCM —, então nele o benefício só se vê pelo valor.
+ALIQ_NORMAL = {"pis": 2.10, "cofins": 9.65}
+
+
+def classe_adicao(calc, dest):
+    """
+    integral: o destacado é o calculado (tolerância R$ 1,00 ou 0,5%);
+    beneficio_10: o destacado é 10% do calculado (entre 8,5% e 11,5%);
+    beneficio_zero: base e alíquota cheias, nada destacado;
+    nao_fecha: qualquer outra coisa.
+    """
+    if calc <= 0.005:
+        return "integral" if abs(dest) <= 1.0 else "nao_fecha"
+    if abs(calc - dest) <= max(1.0, abs(dest) * 0.005):
+        return "integral"
+    if abs(dest) < 0.005:
+        return "beneficio_zero"
+    if 0.085 <= dest / calc <= 0.115:
+        return "beneficio_10"
+    return "nao_fecha"
+
+
+def _vezes_da_base(base, xs):
+    """
+    Quantas vezes a base do grupo entra no calculado. Duas formas de o ERP
+    escrever a mesma coisa:
+
+      · a base é a da ADIÇÃO inteira, repetida em cada linha, e o valor é
+        repartido — conta UMA vez;
+      · as linhas são itens iguais, cada um com a sua base — conta UMA VEZ
+        POR LINHA.
+
+    Em cada linha a base fica perto do valor da própria linha (mediana 1,00
+    nas notas reais). Então vale a leitura cuja razão base ÷ valor fica mais
+    perto de 1: base ÷ soma das linhas (adição) ou base ÷ cada linha (itens).
+    """
+    import math
+    if len(xs) < 2:
+        return 1
+    soma = sum(x["v_oper"] for x in xs)
+    cada = [x["v_oper"] for x in xs if x["v_oper"] > 0]
+    if soma <= 0 or not cada or base <= 0:
+        return 1
+    r_adicao = abs(math.log(base / soma))
+    r_itens = sum(abs(math.log(base / v)) for v in cada) / len(cada)
+    return len(xs) if r_itens < r_adicao else 1
+
+
+def conta_importacao(ls):
+    """
+    A conta de uma nota de importação, adição por adição, para IPI, PIS e
+    COFINS. Devolve, por tributo: calculado, destacado, o que o benefício
+    dispensou, a diferença que nada explica e a lista das adições.
+    """
+    r = {}
+    for t in TRIBUTOS_IMPORTACAO:
+        grupos = defaultdict(list)
+        soltas = []
+        for l in ls:
+            b, p = l[t + "_vbc"], l[t + "_p"]
+            if b is None or p is None:
+                if l[t + "_v"]:
+                    soltas.append(l)
+                continue
+            grupos[(b, p)].append(l)
+        adicoes = []
+        for (b, p), xs in grupos.items():
+            k = _vezes_da_base(b, xs)
+            calc = b * p / 100.0 * k
+            dest = sum(x[t + "_v"] or 0 for x in xs)
+            cl = classe_adicao(calc, dest)
+            # O tributo cheio: pela alíquota da nota, ou pela normal quando a
+            # própria nota já traz a alíquota reduzida (benefício na alíquota).
+            cheio, via = calc, "valor"
+            normal = ALIQ_NORMAL.get(t)
+            if normal and b > 0:
+                if p == 0 and abs(dest) < 0.005:
+                    cl, via = "beneficio_zero", "aliquota"
+                    cheio = b * normal / 100.0 * k
+                elif 0 < p <= normal * 0.115 and cl == "integral":
+                    cl, via = "beneficio_10", "aliquota"
+                    cheio = b * normal / 100.0 * k
+            adicoes.append({
+                "base": b, "aliq": p, "vezes": k, "calc": round(calc, 2), "dest": round(dest, 2),
+                "cheio": round(cheio, 2), "via": via,
+                "dif": round(dest - calc, 2), "razao": round(dest / calc, 4) if calc > 0.005 else None,
+                "classe": cl, "itens": [x["n_item"] for x in xs],
+                "dispensado": round(cheio - dest, 2) if cl.startswith("beneficio") else 0.0,
+            })
+        adicoes.sort(key=lambda a: (a["classe"] == "integral", -abs(a["dif"])))
+        v_soltas = round(sum(x[t + "_v"] or 0 for x in soltas), 2)
+        calc = round(sum(a["calc"] for a in adicoes), 2)
+        dest = round(sum(a["dest"] for a in adicoes) + v_soltas, 2)
+        dispensado = round(sum(a["dispensado"] for a in adicoes), 2)
+        # O que sobra depois de descontar o benefício é a divergência de verdade.
+        # Benefício pela alíquota já está no calculado (a nota fecha com a
+        # alíquota reduzida que declarou); só o benefício pelo valor se desconta.
+        pelo_valor = sum(a["dispensado"] for a in adicoes if a["via"] == "valor")
+        nao_explicado = round(dest - (calc - pelo_valor), 2)
+        r[t] = {"calc": calc, "dest": dest, "dif": round(dest - calc, 2),
+                "dispensado": dispensado, "nao_explicado": nao_explicado,
+                "fecha": abs(nao_explicado) <= max(1.0, abs(dest) * 0.005),
+                "adicoes": adicoes, "soltas": v_soltas,
+                "soltas_itens": [x["n_item"] for x in soltas]}
+    return r
+
+
 def _importacao_por_nota(linhas):
     """
-    Na nota de importação, cada linha repete a base da adição e leva uma parte
-    do valor. A conta certa é por nota: base × alíquota de cada adição (cada
-    par base/alíquota contado uma vez) contra a soma do que as linhas destacam.
-    O resultado vai em todas as linhas da nota, para o filtro achá-las.
+    Na nota de importação a conta é por nota (ver conta_importacao). O
+    resultado vai em todas as linhas da nota, para o filtro achá-las; e cada
+    linha leva a situação da SUA adição em cada tributo — é isso que deixa o
+    item com benefício à vista.
     """
     notas = defaultdict(list)
     for l in linhas:
         if importacao(l) and l["tem_detalhe"] and l["situacao"] != "cancelada":
             notas[l["nfe_id"]].append(l)
-    for ls in notas.values():
-        calc = {}
-        for t in ("ipi", "pis", "cofins"):
-            pares = {(l[t + "_vbc"], l[t + "_p"]) for l in ls
-                     if l[t + "_vbc"] is not None and l[t + "_p"] is not None}
-            c = sum(b * p / 100.0 for b, p in pares)
-            v = sum(l[t + "_v"] or 0 for l in ls)
-            calc[t] = (round(c, 2), round(v, 2), abs(c - v) > max(1.0, abs(v) * 0.005))
+    contas = {}
+    for nfe_id, ls in notas.items():
+        c = conta_importacao(ls)
+        contas[nfe_id] = c
+        por_item = {t: {i: a for a in c[t]["adicoes"] for i in a["itens"]} for t in c}
         for l in ls:
-            l["nota_ipi_calc"], l["nota_ipi_dest"] = calc["ipi"][0], calc["ipi"][1]
-            l["nota_pis_calc"], l["nota_pis_dest"] = calc["pis"][0], calc["pis"][1]
-            l["nota_cofins_calc"], l["nota_cofins_dest"] = calc["cofins"][0], calc["cofins"][1]
-            if calc["ipi"][2]:
+            for t in TRIBUTOS_IMPORTACAO:
+                l[f"nota_{t}_calc"], l[f"nota_{t}_dest"] = c[t]["calc"], c[t]["dest"]
+                l[f"nota_{t}_dispensado"] = c[t]["dispensado"]
+                a = por_item[t].get(l["n_item"])
+                if a and a["classe"] != "integral":
+                    l[f"{t}_classe"] = a["classe"]
+                if a and a["classe"].startswith("beneficio"):
+                    # O dispensado da adição, repartido pelo valor das linhas dela.
+                    xs = [x for x in ls if x["n_item"] in a["itens"]]
+                    tot = sum(x["v_oper"] for x in xs) or len(xs)
+                    parte = (l["v_oper"] if tot != len(xs) else 1) / tot
+                    l[f"{t}_dispensado"] = round(a["dispensado"] * parte, 2)
+            l["beneficio"] = beneficio_txt(l)
+            l["dispensado"] = round(sum(l.get(f"{t}_dispensado") or 0 for t in TRIBUTOS_IMPORTACAO), 2)
+            if not c["ipi"]["fecha"]:
                 l["alertas"].append("importacao_ipi_nao_fecha")
-            if calc["pis"][2] or calc["cofins"][2]:
+            if not (c["pis"]["fecha"] and c["cofins"]["fecha"]):
                 l["alertas"].append("importacao_pis_cofins_nao_fecha")
+    return contas
+
+
+def beneficio_txt(l):
+    """'PIS/COFINS 10%', 'PIS/COFINS zero', 'IPI zero + PIS/COFINS 10%'… ou None."""
+    def rot(classe):
+        return {"beneficio_10": "10%", "beneficio_zero": "zero"}.get(classe)
+    ipi = rot(l.get("ipi_classe"))
+    pis, cof = rot(l.get("pis_classe")), rot(l.get("cofins_classe"))
+    partes = []
+    if ipi:
+        partes.append(f"IPI {ipi}")
+    if pis and pis == cof:
+        partes.append(f"PIS/COFINS {pis}")
+    else:
+        if pis:
+            partes.append(f"PIS {pis}")
+        if cof:
+            partes.append(f"COFINS {cof}")
+    return " + ".join(partes) or None
 
 
 def _fora_do_padrao(linhas, campo, codigo, grupo, conta):
@@ -308,6 +464,9 @@ def resumo(linhas):
         **{c: soma(c) for c in TRIBUTOS},
         "por_fluxo": por_fluxo,
         "alertas": dict(alertas),
+        "beneficio_itens": sum(1 for l in vivas if l.get("beneficio")),
+        "beneficio_notas": len({l["nfe_id"] for l in vivas if l.get("beneficio")}),
+        "beneficio_dispensado": round(sum(l.get("dispensado") or 0 for l in vivas), 2),
         "itens_com_alerta": sum(1 for l in vivas if l["alertas"] and l["alertas"] != ["sem_detalhe"]),
     }
 
@@ -332,8 +491,11 @@ def pacote(notas, itens, impostos, filiais):
     vazio, zero-de-falso e lista vazia não viajam — a tela os lê como vazios.
     Sem isso a resposta passa de 5 MB com três mil itens.
     """
-    linhas = monta(notas, itens, impostos, filiais)
+    linhas, contas = monta(notas, itens, impostos, filiais, com_contas=True)
     enxutas = [{k: v for k, v in l.items() if v not in (None, "", [], False)} for l in linhas]
     return {"itens": enxutas, "resumo": resumo(linhas), "alertas": ALERTAS,
+            "classes": CLASSES,
+            # A conta da importação, adição por adição. A tela mostra; não refaz.
+            "importacoes": {str(k): v for k, v in contas.items()},
             "filiais": [{"cnpj": f["cnpj"], "uf": f.get("uf"), "nome": f.get("nome")}
                         for f in filiais]}
