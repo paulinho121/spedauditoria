@@ -27,6 +27,11 @@ tr.clic { cursor: pointer; }
 tr.clic:hover td { background: var(--surface-low); }
 tr.cancelada td { text-decoration: line-through; opacity: .55; }
 td.forte { font-weight: 700; }
+td.neg { color: var(--error); font-weight: 700; }
+.conf table { font-size: 13px; }
+.conf td.ok { color: var(--success-dark, #1b6b3a); font-weight: 700; }
+.conf details { margin: 10px 0 0; }
+.conf summary { cursor: pointer; font-weight: 600; font-size: 13px; }
 .resumo-filtro { font-size: 12.5px; color: var(--on-surface-variant); margin: 0 0 8px; }
 .mais { margin: 12px 0 24px; }
 .det { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
@@ -172,11 +177,13 @@ const EXPLICA_ALERTA = {
   importacao_ipi_nao_fecha: `Na nota de importação o ERP repete em cada linha a base
     da adição e reparte o valor; por isso a conta é feita na nota inteira, com a base
     de cada adição contada uma vez. Mesmo assim o IPI destacado não fecha — conferir
-    contra a DI/DUIMP. A coluna da nota mostra o calculado e o destacado.`,
+    contra a DI/DUIMP. O quadro <i>Conferência da nota</i>, logo abaixo, mostra o
+    calculado, o destacado e a diferença, adição por adição.`,
   importacao_pis_cofins_nao_fecha: `PIS/COFINS-Importação destacado na nota não fecha
     com base × alíquota, nem somando a nota inteira. Em muitas linhas a nota traz base
     e alíquota com valor zero. Conferir contra o que foi pago na DI/DUIMP — é esse o
-    valor que dá direito a crédito.`,
+    valor que dá direito a crédito. O quadro <i>Conferência da nota</i>, logo abaixo,
+    mostra o calculado, o destacado e a diferença, adição por adição.`,
   cst_tributado_sem_icms: `CST 00, 10 ou 20 diz que a operação é tributada, mas a
     linha não destaca ICMS. Ou o CST está errado (deveria ser 40, 41, 51…) ou faltou o imposto.`,
   cst_isento_com_icms: `CST 40, 41, 50 ou 60 diz que não há destaque, mas a linha
@@ -485,6 +492,17 @@ const COLUNAS = {
     dinheiro('v_oper', 'Valor'),
     ...COL_TRIB.filter(c => c.tipo !== 'pct' && c.soma !== false),
     aliq('carga', 'Carga'),
+    // Importação: a conta da nota inteira. Só aparecem quando há nota de
+    // importação no filtro.
+    dinheiro('nota_ipi_calc', 'IPI calculado', { auto: true }),
+    dinheiro('nota_ipi_dest', 'IPI destacado', { auto: true }),
+    dinheiro('dif_ipi', 'Dif. IPI', { auto: true, sinal: true, fecha: 'ipi' }),
+    dinheiro('nota_pis_calc', 'PIS calculado', { auto: true }),
+    dinheiro('nota_pis_dest', 'PIS destacado', { auto: true }),
+    dinheiro('dif_pis', 'Dif. PIS', { auto: true, sinal: true, fecha: 'pis' }),
+    dinheiro('nota_cofins_calc', 'COFINS calculada', { auto: true }),
+    dinheiro('nota_cofins_dest', 'COFINS destacada', { auto: true }),
+    dinheiro('dif_cofins', 'Dif. COFINS', { auto: true, sinal: true, fecha: 'cofins' }),
     { campo: 'alertas', rotulo: 'Alertas', alertas: true },
     { campo: 'nat_op', rotulo: 'Natureza', det: true, corta: 30 },
     { campo: 'chave', rotulo: 'Chave', det: true, mono: true, exp: false },
@@ -530,6 +548,10 @@ function celula(c, x) {
     return `<td>${a.length ? `<span class="chip warn" title="${esc(a.map(k => ALERTAS[k] || k).join('\n'))}">${n(a.length)} alerta${a.length > 1 ? 's' : ''}</span>` : vazio}</td>`;
   }
   if (c.tipo === 'data') return `<td class="mono">${v ? brDate(v) : vazio}</td>`;
+  if (c.tipo === 'dinheiro' && c.sinal) {
+    const ruim = c.fecha ? x['fecha_' + c.fecha] === false : +v <= -0.005;
+    return `<td class="num${ruim ? ' neg' : ''}">${nada(v) ? vazio : money(v)}</td>`;
+  }
   if (c.tipo === 'dinheiro') return `<td class="num${c.forte ? ' forte' : ''}">${nada(v) || (!+v && c.soma !== false && !c.forte) ? vazio : money(v)}</td>`;
   if (c.tipo === 'pct') return `<td class="num">${nada(v) ? vazio : pc(v)}</td>`;
   if (c.tipo === 'numero') return `<td class="num">${nada(v) ? vazio : qt(v)}</td>`;
@@ -559,6 +581,16 @@ function porNota(xs) {
     g.cfops = [...g.cfopSet].sort().join(', ');
     g.alertas = [...g.alertaSet];
     g.carga = g.v_oper > 0 ? 100 * g.tributos / g.v_oper : null;
+    // A conferência da importação vem pronta do servidor, igual em toda linha
+    // da nota, e vale para a nota inteira — não só para os itens filtrados.
+    const l0 = g.linhas[0];
+    ['ipi', 'pis', 'cofins'].forEach(t => {
+      if (nada(l0['nota_' + t + '_calc']) && nada(l0['nota_' + t + '_dest'])) return;
+      g['nota_' + t + '_calc'] = +l0['nota_' + t + '_calc'] || 0;
+      g['nota_' + t + '_dest'] = +l0['nota_' + t + '_dest'] || 0;
+      g['dif_' + t] = Math.round((g['nota_' + t + '_dest'] - g['nota_' + t + '_calc']) * 100) / 100;
+      g['fecha_' + t] = fecha(g['nota_' + t + '_calc'], g['nota_' + t + '_dest']);
+    });
     return g;
   });
 }
@@ -615,7 +647,7 @@ function desenhar(doInicio) {
          : porAlerta(filtradas);
   const detalhe = $('f-detalhe').checked;
   // Coluna de tributo zerada em tudo o que foi filtrado não ocupa a tela.
-  const temValor = c => xs.some(x => +x[c.campo]);
+  const temValor = c => xs.some(x => +x[c.campo] || (c.sinal && !nada(x[c.campo])));
   colunasVistas = COLUNAS[aba].filter(c => (!c.det || detalhe) && (!c.auto || temValor(c)));
 
   const [campo, dir] = ordem[aba];
@@ -683,21 +715,79 @@ function bloco(titulo, linhas) {
 const m$ = v => nada(v) ? '' : money(v);
 const p$ = v => nada(v) ? '' : pc(v);
 
-function conferenciaImportacao(l) {
-  if (nada(l.nota_ipi_calc) && nada(l.nota_pis_calc)) return '';
-  return bloco('Conferência da nota (importação)', [
-    linhaDet('IPI calculado', m$(l.nota_ipi_calc)), linhaDet('IPI destacado', m$(l.nota_ipi_dest)),
-    linhaDet('PIS calculado', m$(l.nota_pis_calc)), linhaDet('PIS destacado', m$(l.nota_pis_dest)),
-    linhaDet('COFINS calculada', m$(l.nota_cofins_calc)), linhaDet('COFINS destacada', m$(l.nota_cofins_dest)),
-  ]);
+/**
+ * A conta da nota de importação, refeita na frente de quem confere. Cada linha
+ * da nota repete a base da adição inteira e leva uma parte do valor; por isso a
+ * base de cada adição (cada par base/alíquota) entra UMA vez no calculado, e o
+ * destacado é a soma do que as linhas daquela adição trouxeram. A diferença
+ * aparece por adição — é ali que se acha a linha que está errada.
+ */
+const TRIB_IMP = [['ipi', 'IPI'], ['pis', 'PIS'], ['cofins', 'COFINS']];
+const fecha = (calc, dest) => Math.abs(calc - dest) <= Math.max(1, Math.abs(dest) * 0.005);
+
+function contaImportacao(nfe_id) {
+  const ls = todas.filter(x => x.nfe_id === nfe_id && String(x.cfop || '').startsWith('3') && x.tem_detalhe);
+  if (!ls.length) return null;
+  return TRIB_IMP.map(([t, rot]) => {
+    const adicoes = new Map();
+    let soltas = 0, soltasItens = [];
+    ls.forEach(l => {
+      const b = l[t + '_vbc'], a = l[t + '_p'], v = +l[t + '_v'] || 0;
+      if (nada(b) || nada(a)) { if (v) { soltas += v; soltasItens.push(l.n_item); } return; }
+      const k = `${b}|${a}`;
+      let x = adicoes.get(k);
+      if (!x) { x = { base: +b, aliq: +a, calc: +b * +a / 100, dest: 0, itens: [] }; adicoes.set(k, x); }
+      x.dest += v; x.itens.push(l.n_item);
+    });
+    const lista = [...adicoes.values()].sort((p, q) => Math.abs(q.dest - q.calc) - Math.abs(p.dest - p.calc));
+    const calc = lista.reduce((s, x) => s + x.calc, 0);
+    const dest = lista.reduce((s, x) => s + x.dest, 0) + soltas;
+    return { t, rot, calc, dest, dif: dest - calc, fecha: fecha(calc, dest), adicoes: lista, soltas, soltasItens };
+  });
+}
+
+const itensTxt = xs => xs.length > 8 ? `${xs.slice(0, 8).join(', ')} … (+${xs.length - 8})` : xs.join(', ');
+
+function conferenciaImportacao(nfe_id) {
+  const conta = contaImportacao(nfe_id);
+  if (!conta || conta.every(c => !c.calc && !c.dest)) return '';
+  const dif = (v, ok) => `<td class="num${ok ? '' : ' neg'}">${money(v)}</td>`;
+  return `<div class="card conf" style="margin-bottom:12px;border-left:4px solid var(--primary)">
+    <div class="lbl">Conferência da nota (importação)</div>
+    <p class="muted" style="font-size:12.5px;margin:6px 0 8px;line-height:1.5">
+      <b>Calculado</b> = base × alíquota de cada adição, com a base contada uma vez
+      (o ERP a repete em todas as linhas da adição). <b>Destacado</b> = o que as linhas
+      da nota trouxeram. <b>Diferença</b> = destacado − calculado: negativa, a nota
+      destacou a menos. Tolerância: R$ 1,00 ou 0,5%.</p>
+    <div class="wrap"><table><thead><tr><th>Tributo</th><th class="num">Calculado</th>
+      <th class="num">Destacado</th><th class="num">Diferença</th><th>Situação</th></tr></thead><tbody>` +
+    conta.map(c => `<tr><td><b>${c.rot}</b></td><td class="num">${money(c.calc)}</td>
+      <td class="num">${money(c.dest)}</td>${dif(c.dif, c.fecha)}
+      <td class="${c.fecha ? 'ok' : 'neg'}">${c.fecha ? 'fecha' : 'não fecha'}</td></tr>`).join('') +
+    `</tbody></table></div>` +
+    conta.filter(c => c.adicoes.length || c.soltas).map(c => `<details${c.fecha ? '' : ' open'}>
+      <summary>${c.rot}: ${n(c.adicoes.length)} adição(ões) — onde está a diferença</summary>
+      <div class="wrap" style="margin-top:6px"><table><thead><tr>
+        <th class="num">Base da adição</th><th class="num">Alíquota</th><th class="num">Calculado</th>
+        <th class="num">Destacado nas linhas</th><th class="num">Diferença</th><th>Itens da nota</th>
+      </tr></thead><tbody>` +
+      c.adicoes.map(x => `<tr><td class="num">${money(x.base)}</td><td class="num">${pc(x.aliq)}</td>
+        <td class="num">${money(x.calc)}</td><td class="num">${money(x.dest)}</td>${dif(x.dest - x.calc, fecha(x.calc, x.dest))}
+        <td class="mono">${esc(itensTxt(x.itens))}</td></tr>`).join('') +
+      (c.soltas ? `<tr><td colspan="3" class="muted">sem base ou alíquota informada</td>
+        <td class="num">${money(c.soltas)}</td>${dif(c.soltas, false)}<td class="mono">${esc(itensTxt(c.soltasItens))}</td></tr>` : '') +
+      `</tbody><tfoot><tr><td colspan="2">Total</td><td class="num">${money(c.calc)}</td>
+        <td class="num">${money(c.dest)}</td>${dif(c.dif, c.fecha)}<td></td></tr></tfoot></table></div></details>`).join('') +
+    `</div>`;
 }
 
 function abrirItem(l) {
   const p = abrirPainel(`Nota ${esc(l.nota)} · item ${esc(l.n_item || '')}`,
     `${brDate(l.dt)} · ${esc(FLUXO[l.fluxo] || '')} · ${esc(l.part_nome || '')}`);
   const al = l.alertas.map(k => `<div style="margin:0 0 8px"><span class="chip warn">${esc(ALERTAS[k] || k)}</span>
-      <div class="muted" style="font-size:12.5px;margin-top:4px;line-height:1.5">${esc((EXPLICA_ALERTA[k] || '').replace(/\s+/g, ' '))}</div></div>`).join('');
+      <div class="muted" style="font-size:12.5px;margin-top:4px;line-height:1.5">${(EXPLICA_ALERTA[k] || '').replace(/\s+/g, ' ')}</div></div>`).join('');
   p.corpo.innerHTML = (al ? `<div class="card alert" style="margin-bottom:12px">${al}</div>` : '') +
+    conferenciaImportacao(l.nfe_id) +
     `<div class="det">` +
     bloco('Item', [
       linhaDet('Código', esc(l.cod)), linhaDet('Produto', esc(l.descr)), linhaDet('NCM', esc(l.ncm)),
@@ -742,7 +832,6 @@ function abrirItem(l) {
       linhaDet('Alíquota COFINS', p$(l.cofins_p)), linhaDet('COFINS', m$(l.cofins_v)),
     ]) +
     bloco('IBS / CBS', [linhaDet('CST', esc(l.ibscbs_cst)), linhaDet('IBS', m$(l.ibs_v)), linhaDet('CBS', m$(l.cbs_v))]) +
-    conferenciaImportacao(l) +
     bloco('Total', [linhaDet('Tributos destacados', m$(l.tributos)), linhaDet('Carga sobre o valor', p$(l.carga))]) +
     `</div><p style="margin:14px 0 0"><button type="button" id="ver-nota">Ver a nota inteira</button></p>`;
   p.corpo.querySelector('#ver-nota').onclick = () => {
@@ -759,8 +848,7 @@ function abrirNota(g) {
     'st_v', 'difal_v', 'ipi_v', 'ii_v', 'pis_v', 'cofins_v', 'tributos', 'alertas'].includes(c.campo))
     .filter(c => !c.auto || g.linhas.some(x => +x[c.campo]));
   const tot = totais(g.linhas);
-  const conf = conferenciaImportacao(g.linhas[0]);
-  p.corpo.innerHTML = (conf ? `<div class="det" style="margin-bottom:12px">${conf}</div>` : '') +
+  p.corpo.innerHTML = conferenciaImportacao(g.nfe_id) +
     `<p class="muted" style="font-size:13px;margin:0 0 10px">${n(g.linhas.length)} item(ns) · valor
       ${money(tot.v_oper)} · tributos ${money(tot.tributos)}${tot.carga === null ? '' : ` (${pc(tot.carga)})`} ·
       chave <span class="mono">${esc(g.chave || '')}</span>. Clique num item para o detalhe.</p>

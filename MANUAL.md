@@ -570,6 +570,23 @@ e o cabeçalho do arquivo diz quais filtros estavam ligados.
 Os alertas apontam onde olhar; a prova é o documento — a DI/DUIMP na importação,
 o cadastro fiscal do produto nas saídas.
 
+**Conferir o calculado e o destacado na importação.** Em três lugares:
+
+- no **detalhe do item** e no **detalhe da nota**, o quadro *Conferência da nota*
+  aparece logo abaixo do alerta: IPI, PIS e COFINS com calculado, destacado,
+  diferença e situação. Abaixo dele, cada tributo abre **adição por adição** —
+  base, alíquota, calculado, o que as linhas daquela adição destacaram, a
+  diferença e os números dos itens. É ali que se acha a linha que está errada;
+- na aba **Por nota**, as colunas *IPI/PIS/COFINS calculado*, *destacado* e
+  *Dif.* aparecem sempre que houver nota de importação no filtro. Clique no
+  título de *Dif. PIS* para ordenar da maior diferença para a menor;
+- na **exportação** da aba *Por nota*, as mesmas colunas, para conferir contra a
+  DI/DUIMP fora do sistema.
+
+*Diferença* é destacado − calculado: negativa, a nota destacou a menos. Fica em
+vermelho só o que passa da tolerância (R$ 1,00 ou 0,5%). A conferência é sempre
+da nota inteira, mesmo quando o filtro deixou só parte dos itens.
+
 ### Extrato do ERP — a versão do cliente da mesma história
 
 Tela **ERP**. O relatório *Extrato de produtos por depósito, produto e lote* é
