@@ -413,6 +413,18 @@ def real_desfazer_ajustes(body):
     return {"desfeitos": int(r[0]["n"]) if r else 0}
 
 
+def impostos_tela(qs):
+    """O imposto de cada item de NF-e, do ponto de vista da filial (aba Impostos)."""
+    _sobe_auditoria()
+    from auditoria import impostos
+    c = impostos.COLUNAS
+    return impostos.pacote(
+        query(f"select {c['nfe']} from nfe"),
+        query(f"select {c['nfe_item']} from nfe_item"),
+        query("select * from nfe_item_imposto"),
+        query(f"select {c['estabelecimento']} from estabelecimento"))
+
+
 def erp_saldos(qs):
     """Fotos do saldo do ERP já importadas, da mais recente para a mais antiga."""
     return query(
@@ -873,6 +885,7 @@ ROUTES = {
     "/api/real/terceiros": _real_lista("erp_real_em_terceiros"),
     "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias"),
     "/api/real/kardex": real_kardex,
+    "/api/impostos": impostos_tela,
     "/api/real/ajustes": real_ajustes,
     "/api/periodo/cfops": lambda qs: query(sql_conferencia_cfop(
         (qs.get("mes") or [""])[0], (qs.get("uf") or [""])[0])),
@@ -1088,6 +1101,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/erp.html"
         if path == "/estoque-real":
             path = "/estoque_real.html"
+        if path == "/impostos":
+            path = "/impostos.html"
         if path == "/relatorio":
             path = "/relatorio.html"
         if path == "/manual":

@@ -276,6 +276,25 @@ def rota_real_kardex(qs):
         "order": "seq"})
 
 
+def rota_impostos(qs):
+    """
+    O imposto de cada item de NF-e, do ponto de vista da filial (aba Impostos).
+    As quatro tabelas vêm em paralelo: em série, a paginação do PostgREST somava
+    quase vinte segundos.
+    """
+    _sobe_auditoria()
+    from concurrent.futures import ThreadPoolExecutor
+    from auditoria import impostos
+    c = impostos.COLUNAS
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        fut = {t: ex.submit(consulta_rest_tudo, t, {"select": c[t], "order": "id" if t != "estabelecimento" else "cnpj"})
+               for t in ("nfe", "nfe_item", "estabelecimento")}
+        fut["nfe_item_imposto"] = ex.submit(consulta_rest_tudo, "nfe_item_imposto",
+                                            {"order": "nfe_item_id"})
+        r = {t: f.result() for t, f in fut.items()}
+    return impostos.pacote(r["nfe"], r["nfe_item"], r["nfe_item_imposto"], r["estabelecimento"])
+
+
 def rota_erp_saldo(qs):
     """A foto do saldo do ERP contra a nossa posição. Sem id, a mais recente."""
     aid = int((qs.get("id") or ["0"])[0] or 0)
@@ -517,6 +536,7 @@ ROTAS = {
     "/api/real/terceiros": _real_lista("erp_real_em_terceiros", "dt,seq"),
     "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias", "dt,seq"),
     "/api/real/kardex": rota_real_kardex,
+    "/api/impostos": rota_impostos,
     # Definida mais abaixo, junto dos POST de ajuste: só é resolvida na chamada.
     "/api/real/ajustes": lambda qs: rota_real_ajustes(qs),
     "/api/periodo/cfops": lambda qs: consulta_rest(
@@ -849,7 +869,15 @@ def app(environ, start_response):
     def responde(status, corpo, ctype="application/json; charset=utf-8", cookie=None):
         if isinstance(corpo, str):
             corpo = corpo.encode("utf-8")
-        cabecalhos = [("Content-Type", ctype), ("Content-Length", str(len(corpo))),
+        extra = []
+        # Resposta grande vai comprimida: o Vercel recusa corpo acima de 4,5 MB,
+        # e a lista de impostos de três mil itens passa de 3 MB em texto (330 KB
+        # comprimida). Todo navegador aceita gzip.
+        if len(corpo) > 256 * 1024 and "gzip" in environ.get("HTTP_ACCEPT_ENCODING", ""):
+            import gzip
+            corpo = gzip.compress(corpo, compresslevel=6)
+            extra = [("Content-Encoding", "gzip"), ("Vary", "Accept-Encoding")]
+        cabecalhos = extra + [("Content-Type", ctype), ("Content-Length", str(len(corpo))),
                       ("Cache-Control", "no-store"),
                       ("X-Content-Type-Options", "nosniff"),
                       ("Referrer-Policy", "same-origin")]
@@ -907,6 +935,8 @@ def app(environ, start_response):
         caminho = "/erp.html"
     elif caminho == "/estoque-real":
         caminho = "/estoque_real.html"
+    elif caminho == "/impostos":
+        caminho = "/impostos.html"
     elif caminho == "/relatorio":
         caminho = "/relatorio.html"
     elif caminho == "/manual":

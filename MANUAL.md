@@ -517,6 +517,59 @@ nenhuma.
 gravados. Importe os mesmos arquivos de novo: nada é duplicado, e os impostos
 que faltavam são completados.
 
+### Impostos — o imposto de cada item, com filtros
+
+A aba **Impostos** mostra o que cada NF-e **destacou**, item a item: ICMS,
+ICMS-ST, FCP, DIFAL, IPI, II, PIS, COFINS e IBS/CBS. A linha é vista do lado da
+filial — se a mercadoria **entrou** ou **saiu**, com quem, e se a operação foi
+interna, interestadual ou de importação. Nada é recalculado no lugar do que a
+nota trouxe.
+
+**De onde vêm os dados.** Dos XML de NF-e importados (aba *Importar*). Nota
+importada antes de o sistema guardar o imposto por item aparece com *sem
+detalhe*: o valor da operação conta, o imposto não, e a tela avisa quantos itens
+ficaram de fora do total. Reimportar o XML preenche o que falta, sem duplicar.
+
+**Filtros.** Busca (nota, chave, produto, código, NCM, cliente, CNPJ,
+natureza), período, valor mínimo de tributos e as listas de marcar — filial,
+entrada/saída, operação, CFOP, CST, alíquota do ICMS, tributo destacado, NCM,
+UF da outra parte e alerta. Em cada lista, o número ao lado de cada opção é
+quantos itens sobram **com todos os outros filtros já aplicados**: marcar uma
+opção nunca leva a uma tela vazia sem avisar. Os atalhos do topo (*Saídas*,
+*Importações*, *Com DIFAL*, *Com alerta*…) montam as combinações mais usadas.
+Os cartões de total acompanham o filtro.
+
+**Abas.**
+
+| Aba | O que mostra |
+|---|---|
+| *Por item* | Uma linha por item. Coluna de tributo zerada em tudo o que foi filtrado some sozinha. *bases e alíquotas* mostra base, alíquota e CST de cada tributo |
+| *Por nota* | Uma linha por nota, somando só os itens que passaram no filtro |
+| *Resumo* | Os itens somados por CFOP, NCM, CST, alíquota, mês, cliente/fornecedor, UF, filial, operação, natureza ou origem. Clicar numa linha filtra por ela |
+| *Alertas* | O que a conferência apontou, com a explicação. Clicar filtra os itens do alerta |
+
+Clique num item para ver tudo o que a nota destacou nele; clique numa nota para
+ver os itens. A exportação (.xlsx ou PDF) leva tudo o que o filtro deixou passar,
+e o cabeçalho do arquivo diz quais filtros estavam ligados.
+
+**O que a conferência aponta.**
+
+- **A conta não fecha:** base × alíquota não dá o valor destacado (tolerância de
+  5 centavos ou 0,5%). Na **nota de importação** a conta é feita na nota
+  inteira: o ERP repete em cada linha a base da adição e reparte o valor, então
+  item a item ela nunca fecha. Na nota, a base de cada adição conta uma vez.
+- **CST contra valor:** CST 00/10/20 sem ICMS; CST 40/41/50/60 com ICMS. O CSOSN
+  do Simples (três dígitos) não entra nessa regra.
+- **Alíquota interestadual** na saída emitida pela filial: importado (origem 1,
+  2, 3 ou 8) a 4%; nacional a 7% (de S/SE, menos ES, para N/NE/CO/ES) ou 12%.
+- **Venda a não contribuinte de outra UF sem DIFAL** (CFOP 6107/6108).
+- **Alíquota fora do padrão do NCM:** o mesmo NCM, na mesma operação, com outra
+  alíquota em pelo menos 80% das linhas. Grupo sem padrão claro não acusa
+  ninguém; 9,74% e 9,75% contam como a mesma alíquota.
+
+Os alertas apontam onde olhar; a prova é o documento — a DI/DUIMP na importação,
+o cadastro fiscal do produto nas saídas.
+
 ### Extrato do ERP — a versão do cliente da mesma história
 
 Tela **ERP**. O relatório *Extrato de produtos por depósito, produto e lote* é

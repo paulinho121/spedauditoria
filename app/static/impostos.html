@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Impostos — Fiscal Stock</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.abas { display: flex; gap: 4px; margin: 20px 0 0; flex-wrap: wrap; align-items: center; }
+.abas button.on, .atalhos button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.abas button .qt { opacity: .75; font-weight: 400; margin-left: 6px; }
+.atalhos { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+.atalhos button { padding: 5px 11px; font-size: 12.5px; }
+.filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 12px; }
+.filtros label { font-size: 12px; color: var(--on-surface-variant); display: flex; align-items: center; gap: 6px; }
+.filtros input[type=date] { padding: 6px 8px; }
+.filtros input[type=number] { width: 96px; }
+.multi > button.ativo { border-color: var(--primary); color: var(--primary); font-weight: 700; }
+.multi-lista .busca { width: 100%; margin: 0 0 4px; }
+.multi-lista label.zero { opacity: .45; }
+.multi-lista label .qt { margin-left: auto; color: var(--on-surface-variant); font-size: 12px;
+                         font-variant-numeric: tabular-nums; }
+th.ord { cursor: pointer; user-select: none; white-space: nowrap; }
+th.ord:hover { color: var(--primary); }
+th.ord .seta { font-size: 10px; opacity: .8; margin-left: 3px; }
+tr.clic { cursor: pointer; }
+tr.clic:hover td { background: var(--surface-low); }
+tr.cancelada td { text-decoration: line-through; opacity: .55; }
+td.forte { font-weight: 700; }
+.resumo-filtro { font-size: 12.5px; color: var(--on-surface-variant); margin: 0 0 8px; }
+.mais { margin: 12px 0 24px; }
+.det { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.det .card { padding: 12px 14px; }
+.det dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 8px 0 0; font-size: 13px; }
+.det dt { color: var(--on-surface-variant); }
+.det dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.chips-alerta .chip { margin: 0 4px 4px 0; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>FISCAL STOCK</h1>
+    <div class="sub">Impostos destacados nas NF-e, item a item</div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Dashboard</a>
+    <a href="/reconstrucao">Reconstrução</a>
+    <a href="/mes">Mês</a>
+    <a href="/apuracao">Apuração</a>
+    <a class="on" href="/impostos">Impostos</a>
+    <a href="/resultado">Resultado</a>
+    <a href="/importar">Importar</a>
+    <a href="/erp">ERP</a>
+    <a href="/estoque-real">Estoque real</a>
+    <a href="/achados">Achados</a>
+    <a href="/relatorio">Relatório</a>
+    <a href="/manual">Manual</a>
+    <a href="#" id="btn-sair" title="Encerrar sessão">Sair</a>
+  </nav>
+</header>
+
+<main>
+  <div id="erro"></div>
+
+  <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
+    <div class="lbl">O que esta tela mostra</div>
+    <p style="margin:8px 0 0;font-size:14px;line-height:1.6">
+      O imposto que cada NF-e <b>destacou</b>, item a item — ICMS, ICMS-ST, FCP,
+      DIFAL, IPI, II, PIS, COFINS e IBS/CBS — do ponto de vista da filial: se a
+      mercadoria <b>entrou</b> ou <b>saiu</b>, com quem, e se a operação foi interna,
+      interestadual ou de importação. Nada é recalculado no lugar do que a nota
+      trouxe; a conferência só aponta onde a conta não fecha. Os filtros
+      <b>mostram quantos itens sobram</b> em cada opção, já com os outros filtros
+      aplicados, e os totais acompanham o que estiver filtrado.
+    </p>
+  </div>
+
+  <div class="atalhos" id="atalhos">
+    <button data-atalho="todas" class="on">Todas</button>
+    <button data-atalho="saidas">Saídas</button>
+    <button data-atalho="entradas">Entradas</button>
+    <button data-atalho="importacoes">Importações</button>
+    <button data-atalho="interestaduais">Interestaduais</button>
+    <button data-atalho="difal">Com DIFAL</button>
+    <button data-atalho="st">Com ICMS-ST</button>
+    <button data-atalho="alerta">Com alerta</button>
+    <button data-atalho="sem_detalhe">Sem detalhe de imposto</button>
+  </div>
+
+  <div class="filtros" id="filtros">
+    <input type="search" id="q" placeholder="Nota, chave, produto, NCM, cliente, CNPJ…"
+           autocomplete="off" style="min-width:260px">
+    <label>de <input type="date" id="f-de"></label>
+    <label>até <input type="date" id="f-ate"></label>
+    <span id="facetas" style="display:contents"></span>
+    <label>tributos ≥ R$ <input type="number" id="f-min" min="0" step="any"></label>
+    <label><input type="checkbox" id="f-canceladas"> incluir canceladas</label>
+    <label><input type="checkbox" id="f-detalhe"> bases e alíquotas</label>
+    <button type="button" id="limpar">Limpar filtros</button>
+  </div>
+
+  <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
+  <div id="aviso" hidden class="card alert" style="margin:16px 0 0"></div>
+
+  <div class="abas" id="abas">
+    <button data-aba="itens" class="on">Por item</button>
+    <button data-aba="notas">Por nota</button>
+    <button data-aba="resumo">Resumo</button>
+    <button data-aba="alertas">Alertas</button>
+    <select id="agrupar" hidden style="margin-left:8px">
+      <option value="cfop">por CFOP</option>
+      <option value="ncm">por NCM</option>
+      <option value="cst">por CST do ICMS</option>
+      <option value="aliq">por alíquota do ICMS</option>
+      <option value="mes">por mês</option>
+      <option value="part">por cliente / fornecedor</option>
+      <option value="part_uf">por UF da outra parte</option>
+      <option value="filial">por filial</option>
+      <option value="operacao">por tipo de operação</option>
+      <option value="nat_op">por natureza da operação</option>
+      <option value="orig">por origem da mercadoria</option>
+    </select>
+    <button id="exportar" style="margin-left:auto">Exportar ↓</button>
+  </div>
+
+  <p class="muted" id="explica" style="font-size:13px;margin:12px 0 8px;line-height:1.6"></p>
+  <p class="resumo-filtro" id="resumo-filtro"></p>
+
+  <div class="wrap">
+    <table id="tbl">
+      <thead><tr><th>—</th></tr></thead>
+      <tbody><tr><td class="skel">carregando…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="mais"><button type="button" id="mais" hidden>Mostrar mais linhas</button></div>
+</main>
+
+<script src="/app.js"></script>
+<script>ligarSair(); ligarTrabalhos();</script>
+<script>
+const $ = id => document.getElementById(id);
+const LOTE = 300;
+const vazio = '<span class="muted">—</span>';
+const nada = v => v === null || v === undefined || v === '';
+const pc = v => nada(v) ? '—' : (+v).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + '%';
+const qt = v => (+v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+
+function card(lbl, val, foot, cls) {
+  return `<div class="card ${cls || ''}"><div class="lbl">${lbl}</div>
+          <div class="val sm">${val}</div><div class="foot">${foot || ''}</div></div>`;
+}
+
+const FLUXO = { entrada: 'Entrada', saida: 'Saída' };
+const OPERACAO = { interna: 'Interna', interestadual: 'Interestadual', exterior: 'Exterior / importação' };
+const ORIGEM = { 0: '0 · nacional', 1: '1 · importação direta', 2: '2 · importada, mercado interno',
+  3: '3 · nacional, >40% importado', 4: '4 · nacional, processo básico', 5: '5 · nacional, ≤40% importado',
+  6: '6 · importação direta sem similar', 7: '7 · importada sem similar, mercado interno',
+  8: '8 · nacional, >70% importado' };
+
+// O que cada alerta quer dizer, com mais palavras do que cabe no chip.
+const EXPLICA_ALERTA = {
+  sem_detalhe: `A nota foi importada antes de o sistema guardar o imposto por item. O
+    total da nota existe, o detalhe não. Reimportar o XML preenche — reimportar não
+    duplica nada.`,
+  icms_nao_fecha: `Base × alíquota do ICMS não dá o valor destacado (tolerância de
+    5 centavos ou 0,5%). Costuma ser base reduzida informada errado ou alíquota trocada.`,
+  ipi_nao_fecha: `Base × alíquota do IPI não dá o valor destacado.`,
+  pis_nao_fecha: `Base × alíquota do PIS não dá o valor destacado.`,
+  cofins_nao_fecha: `Base × alíquota da COFINS não dá o valor destacado.`,
+  importacao_ipi_nao_fecha: `Na nota de importação o ERP repete em cada linha a base
+    da adição e reparte o valor; por isso a conta é feita na nota inteira, com a base
+    de cada adição contada uma vez. Mesmo assim o IPI destacado não fecha — conferir
+    contra a DI/DUIMP. A coluna da nota mostra o calculado e o destacado.`,
+  importacao_pis_cofins_nao_fecha: `PIS/COFINS-Importação destacado na nota não fecha
+    com base × alíquota, nem somando a nota inteira. Em muitas linhas a nota traz base
+    e alíquota com valor zero. Conferir contra o que foi pago na DI/DUIMP — é esse o
+    valor que dá direito a crédito.`,
+  cst_tributado_sem_icms: `CST 00, 10 ou 20 diz que a operação é tributada, mas a
+    linha não destaca ICMS. Ou o CST está errado (deveria ser 40, 41, 51…) ou faltou o imposto.`,
+  cst_isento_com_icms: `CST 40, 41, 50 ou 60 diz que não há destaque, mas a linha
+    destaca ICMS.`,
+  interestadual_importado: `Mercadoria importada (origem 1, 2, 3 ou 8) saindo para
+    outra UF tem alíquota de 4% (Resolução do Senado 13/2012). A linha usa outra.`,
+  interestadual_nacional: `Mercadoria nacional para outra UF: 7% quando sai de
+    S/SE (menos ES) para N/NE/CO/ES; 12% nos demais casos. A linha usa outra.`,
+  sem_difal: `Venda a não contribuinte de outra UF (CFOP 6107/6108) com ICMS e sem o
+    grupo do DIFAL — obrigatório desde 2016 (EC 87/2015).`,
+  aliquota_icms_fora_do_ncm: `O mesmo NCM, na mesma operação e com a mesma origem, tem
+    outra alíquota de ICMS em pelo menos 80% das linhas. Esta destoa — a coluna do
+    detalhe mostra a alíquota padrão.`,
+  aliquota_ipi_fora_do_ncm: `O mesmo NCM tem outra alíquota de IPI em pelo menos 80%
+    das linhas da mesma operação. A TIPI é por NCM: alíquota diferente costuma ser
+    cadastro errado ou ex-tarifário que precisa de comprovação.`,
+};
+
+/* ---------------------------------------------------------------- tributos */
+const TRIB = [
+  ['icms_v', 'ICMS'], ['st_v', 'ICMS-ST'], ['fcp_v', 'FCP'], ['difal_v', 'DIFAL'],
+  ['ipi_v', 'IPI'], ['ii_v', 'II'], ['pis_v', 'PIS'], ['cofins_v', 'COFINS'], ['ibscbs_v', 'IBS/CBS'],
+];
+const SOMAS = ['v_oper', 'tributos', 'icms_deson'].concat(TRIB.map(t => t[0]));
+
+/* -------------------------------------------------------------- as facetas
+   Cada faceta é uma lista de marcar. A contagem ao lado de cada opção é a dos
+   itens que sobram com TODOS os outros filtros aplicados — marcar uma opção
+   nunca leva a uma tela vazia sem avisar.                                   */
+const FACETAS = [
+  { id: 'filial', rot: 'Filial', val: l => l.filial_uf || '—' },
+  { id: 'fluxo', rot: 'Entrada / saída', val: l => l.fluxo, nome: v => FLUXO[v] || v },
+  { id: 'operacao', rot: 'Operação', val: l => l.operacao, nome: v => OPERACAO[v] || v },
+  { id: 'cfop', rot: 'CFOP', val: l => l.cfop || '—', nome: v => v + (NAT_DO_CFOP[v] ? ' · ' + NAT_DO_CFOP[v] : '') },
+  { id: 'cst', rot: 'CST do ICMS', val: l => l.cst || 'sem CST' },
+  { id: 'aliq', rot: 'Alíquota do ICMS', val: l => +l.icms_v > 0 ? pc(l.icms_p) : 'sem ICMS',
+    ordem: v => v === 'sem ICMS' ? -1 : parseFloat(v.replace(',', '.')) },
+  { id: 'tributo', rot: 'Tributo destacado', multi: true,
+    val: l => { const t = TRIB.filter(([c]) => +l[c] > 0).map(x => x[1]); return t.length ? t : ['nenhum']; } },
+  { id: 'ncm', rot: 'NCM', val: l => l.ncm || '—', nome: v => v + (DESC_DO_NCM[v] ? ' · ' + DESC_DO_NCM[v] : '') },
+  { id: 'uf', rot: 'UF da outra parte', val: l => l.part_uf || '—' },
+  { id: 'alerta', rot: 'Alerta', multi: true,
+    val: l => (l.alertas && l.alertas.length) ? l.alertas : ['nenhum'],
+    nome: v => v === 'nenhum' ? 'Sem alerta' : (ALERTAS[v] || v) },
+];
+const marcadas = Object.fromEntries(FACETAS.map(f => [f.id, new Set()]));
+let NAT_DO_CFOP = {}, DESC_DO_NCM = {}, ALERTAS = {};
+
+/* ------------------------------------------------------------------- estado */
+let todas = [], resumoGeral = null, aba = 'itens';
+let filtradas = [], vistas = [], colunasVistas = [], mostradas = LOTE;
+const ordem = { itens: ['dt', -1], notas: ['dt', -1], resumo: ['tributos', -1], alertas: ['itens', -1] };
+
+async function carregar() {
+  let r;
+  try { r = await api('/api/impostos'); } catch (e) { return falha(e); }
+  ALERTAS = r.alertas || {};
+  resumoGeral = r.resumo || {};
+  todas = (r.itens || []).map(l => {
+    l.alertas = l.alertas || [];
+    l.ibscbs_v = (+l.ibs_v || 0) + (+l.cbs_v || 0) || undefined;
+    l.fcp_v = (+l.fcpst_v || 0) + (+l.difal_fcp_v || 0) || undefined;
+    l.nota = (l.num || '?') + (l.serie ? '/' + l.serie : '');
+    return l;
+  });
+  // Rótulos que ajudam a escolher: a natureza mais comum de cada CFOP e uma
+  // descrição de produto de cada NCM, tirados das próprias notas.
+  const cont = (campo, chave) => {
+    const m = {};
+    todas.forEach(l => {
+      const k = l[chave], v = l[campo];
+      if (!k || !v) return;
+      (m[k] = m[k] || {})[v] = (m[k][v] || 0) + 1;
+    });
+    return Object.fromEntries(Object.entries(m).map(([k, c]) =>
+      [k, Object.entries(c).sort((a, b) => b[1] - a[1])[0][0].slice(0, 40)]));
+  };
+  NAT_DO_CFOP = cont('nat_op', 'cfop');
+  DESC_DO_NCM = cont('descr', 'ncm');
+  montarFacetas();
+  desenhar(true);
+}
+
+/* ------------------------------------------------------------------ filtros */
+function passa(l, ignorar) {
+  if (!$('f-canceladas').checked && l.situacao === 'cancelada') return false;
+  const de = $('f-de').value, ate = $('f-ate').value;
+  if ((de && l.dt < de) || (ate && l.dt > ate)) return false;
+  const min = +$('f-min').value || 0;
+  if (min && (+l.tributos || 0) < min) return false;
+  const q = $('q').value.trim().toUpperCase();
+  if (q && !`${l.nota} ${l.chave || ''} ${l.cod || ''} ${l.descr || ''} ${l.ncm || ''} ${l.part_nome || ''} ${l.part_doc || ''} ${l.nat_op || ''} ${l.cfop}`
+            .toUpperCase().includes(q)) return false;
+  for (const f of FACETAS) {
+    if (f.id === ignorar) continue;
+    const s = marcadas[f.id];
+    if (!s.size) continue;
+    const v = f.val(l);
+    if (f.multi ? !v.some(x => s.has(x)) : !s.has(v)) return false;
+  }
+  return true;
+}
+
+function montarFacetas() {
+  $('facetas').innerHTML = FACETAS.map(f => `
+    <div class="multi" id="m-${f.id}" data-faceta="${f.id}">
+      <button type="button" id="m-${f.id}-btn">${esc(f.rot)}</button>
+      <div class="multi-lista" id="m-${f.id}-lista" hidden>
+        <div class="multi-acoes">
+          <input type="search" class="busca" placeholder="procurar…" autocomplete="off">
+          <button type="button" data-limpa="1">Limpar</button>
+        </div>
+        <div class="opcoes"></div>
+      </div>
+    </div>`).join('');
+  FACETAS.forEach(f => {
+    const cx = $('m-' + f.id), lista = $('m-' + f.id + '-lista'), bt = $('m-' + f.id + '-btn');
+    const mostrar = abrir => {
+      // Uma lista aberta por vez.
+      if (abrir) document.querySelectorAll('#facetas .multi-lista').forEach(x => { if (x !== lista) x.hidden = true; });
+      lista.hidden = !abrir;
+      if (abrir) { opcoes(f); lista.querySelector('.busca').focus(); }
+    };
+    bt.onclick = e => { e.stopPropagation(); mostrar(lista.hidden); };
+    lista.onclick = e => {
+      e.stopPropagation();
+      if (e.target.dataset && e.target.dataset.limpa) { marcadas[f.id].clear(); mudou(); return; }
+      if (e.target.tagName === 'INPUT' && e.target.type === 'checkbox') {
+        const s = marcadas[f.id];
+        if (e.target.checked) s.add(e.target.value); else s.delete(e.target.value);
+        mudou();
+      }
+    };
+    lista.querySelector('.busca').oninput = () => opcoes(f);
+  });
+  document.addEventListener('click', () =>
+    document.querySelectorAll('#facetas .multi-lista').forEach(x => x.hidden = true));
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') document.querySelectorAll('#facetas .multi-lista').forEach(x => x.hidden = true);
+  });
+  rotulosFacetas();
+}
+
+/** Desenha as opções de uma faceta com a contagem já filtrada pelas outras. */
+function opcoes(f) {
+  const lista = $('m-' + f.id + '-lista');
+  const busca = lista.querySelector('.busca').value.trim().toUpperCase();
+  const c = new Map();
+  todas.forEach(l => {
+    if (!passa(l, f.id)) return;
+    const v = f.val(l);
+    (f.multi ? v : [v]).forEach(x => c.set(x, (c.get(x) || 0) + 1));
+  });
+  // As marcadas aparecem mesmo que tenham zerado — senão não dá para desmarcar.
+  marcadas[f.id].forEach(v => { if (!c.has(v)) c.set(v, 0); });
+  const nome = f.nome || (v => v);
+  let ops = [...c.entries()];
+  ops.sort(f.ordem ? (a, b) => f.ordem(a[0]) - f.ordem(b[0])
+                   : (a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]), 'pt-BR', { numeric: true }));
+  if (busca) ops = ops.filter(([v]) => String(nome(v)).toUpperCase().includes(busca));
+  const total = ops.length;
+  ops = ops.slice(0, 400);
+  lista.querySelector('.opcoes').innerHTML = ops.length
+    ? ops.map(([v, q]) => `<label class="${q ? '' : 'zero'}">
+        <input type="checkbox" value="${esc(v)}"${marcadas[f.id].has(v) ? ' checked' : ''}>
+        <span>${esc(nome(v))}</span><span class="qt">${n(q)}</span></label>`).join('') +
+      (total > ops.length ? `<div class="muted" style="font-size:12px;padding:6px 8px">
+        mais ${n(total - ops.length)} — use a busca</div>` : '')
+    : '<div class="muted" style="font-size:12px;padding:6px 8px">nada</div>';
+}
+
+function rotulosFacetas() {
+  FACETAS.forEach(f => {
+    const s = marcadas[f.id], bt = $('m-' + f.id + '-btn');
+    const nome = f.nome || (v => v);
+    bt.textContent = !s.size ? f.rot : s.size === 1 ? `${f.rot}: ${String(nome([...s][0])).slice(0, 28)}`
+                                                    : `${f.rot}: ${s.size} marcados`;
+    bt.classList.toggle('ativo', s.size > 0);
+  });
+}
+
+function mudou(manterAtalho) {
+  rotulosFacetas();
+  if (!manterAtalho) $('atalhos').querySelectorAll('button').forEach(b => b.classList.remove('on'));
+  // A lista aberta se refaz com as contagens novas.
+  FACETAS.forEach(f => { if (!$('m-' + f.id + '-lista').hidden) opcoes(f); });
+  desenhar(true);
+}
+
+const ATALHOS = {
+  todas: {},
+  saidas: { fluxo: ['saida'] },
+  entradas: { fluxo: ['entrada'] },
+  importacoes: { fluxo: ['entrada'], operacao: ['exterior'] },
+  interestaduais: { operacao: ['interestadual'] },
+  difal: { tributo: ['DIFAL'] },
+  st: { tributo: ['ICMS-ST'] },
+  alerta: { alerta: () => Object.keys(ALERTAS).filter(k => k !== 'sem_detalhe') },
+  sem_detalhe: { alerta: ['sem_detalhe'] },
+};
+$('atalhos').onclick = e => {
+  const b = e.target.closest('button[data-atalho]');
+  if (!b) return;
+  const a = ATALHOS[b.dataset.atalho];
+  FACETAS.forEach(f => marcadas[f.id].clear());
+  Object.entries(a).forEach(([k, v]) => (typeof v === 'function' ? v() : v).forEach(x => marcadas[k].add(x)));
+  $('atalhos').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  mudou(true);
+};
+
+/* --------------------------------------------------------------- os números */
+function totais(xs) {
+  const t = { itens: xs.length, notas: new Set(xs.map(l => l.nfe_id)).size };
+  SOMAS.forEach(c => t[c] = xs.reduce((s, l) => s + (+l[c] || 0), 0));
+  t.carga = t.v_oper > 0 ? 100 * t.tributos / t.v_oper : null;
+  return t;
+}
+
+function kpis(xs) {
+  const t = totais(xs);
+  const pp = v => t.tributos ? pc(100 * v / t.tributos) + ' dos tributos' : '';
+  const cards = [
+    card('Itens filtrados', n(t.itens), `${n(t.notas)} notas`),
+    card('Valor das operações', money(t.v_oper), 'produtos − desconto + frete, seguro e outras'),
+    card('Tributos destacados', money(t.tributos), t.carga === null ? '' : `carga de ${pc(t.carga)} sobre o valor`),
+  ];
+  TRIB.forEach(([c, r]) => {
+    if (Math.abs(t[c]) > 0.004) cards.push(card(r, money(t[c]), pp(t[c])));
+  });
+  if (t.icms_deson > 0.004) cards.push(card('ICMS desonerado', money(t.icms_deson), 'informado, não somado nos tributos'));
+  $('kpis').innerHTML = cards.join('');
+
+  // Item sem detalhe não tem imposto para somar: o total está incompleto.
+  const sem = xs.filter(l => !l.tem_detalhe);
+  $('aviso').hidden = !sem.length;
+  if (sem.length) {
+    const notas = new Set(sem.map(l => l.nfe_id)).size;
+    const anos = [...new Set(sem.map(l => (l.dt || '').slice(0, 4)))].sort().join(', ');
+    $('aviso').innerHTML = `<div class="lbl">Os totais acima não incluem ${n(sem.length)} itens</div>
+      <p style="margin:8px 0 0;font-size:14px;line-height:1.6">${n(sem.length)} itens de
+      ${n(notas)} notas (${esc(anos)}) entraram no sistema antes de ele guardar o imposto
+      por item. O valor da operação conta; o imposto deles, não. Para completar,
+      reimporte os XML dessas notas na aba <a href="/importar">Importar</a> — a
+      reimportação só preenche o que falta, não duplica nada.</p>`;
+  }
+}
+
+/* ------------------------------------------------------------------- colunas */
+const dinheiro = (campo, rotulo, extra) => ({ campo, rotulo, tipo: 'dinheiro', soma: true, ...extra });
+const aliq = (campo, rotulo, extra) => ({ campo, rotulo, tipo: 'pct', ...extra });
+const COL_TRIB = [
+  aliq('icms_p', 'Alíq. ICMS'),
+  dinheiro('icms_vbc', 'Base ICMS', { det: true, soma: false }),
+  dinheiro('icms_v', 'ICMS'),
+  dinheiro('icms_deson', 'ICMS deson.', { det: true, auto: true }),
+  dinheiro('st_vbc', 'Base ST', { det: true, auto: true, soma: false }),
+  aliq('st_p', 'Alíq. ST', { det: true, auto: true }),
+  dinheiro('st_v', 'ICMS-ST', { auto: true }),
+  dinheiro('fcp_v', 'FCP', { auto: true }),
+  dinheiro('difal_vbc', 'Base DIFAL', { det: true, auto: true, soma: false }),
+  aliq('difal_p_dest', 'Alíq. destino', { det: true, auto: true }),
+  aliq('difal_p_inter', 'Alíq. interest.', { det: true, auto: true }),
+  dinheiro('difal_v', 'DIFAL', { auto: true }),
+  dinheiro('ipi_vbc', 'Base IPI', { det: true, auto: true, soma: false }),
+  aliq('ipi_p', 'Alíq. IPI', { det: true, auto: true }),
+  dinheiro('ipi_v', 'IPI', { auto: true }),
+  dinheiro('ii_v', 'II', { auto: true }),
+  dinheiro('pis_vbc', 'Base PIS', { det: true, soma: false }),
+  aliq('pis_p', 'Alíq. PIS', { det: true }),
+  dinheiro('pis_v', 'PIS'),
+  aliq('cofins_p', 'Alíq. COFINS', { det: true }),
+  dinheiro('cofins_v', 'COFINS'),
+  dinheiro('ibscbs_v', 'IBS/CBS', { auto: true }),
+  dinheiro('tributos', 'Total tributos', { forte: true }),
+  aliq('carga', 'Carga'),
+];
+const COLUNAS = {
+  itens: [
+    { campo: 'dt', rotulo: 'Data', tipo: 'data' },
+    { campo: 'nota', rotulo: 'Nota', mono: true },
+    { campo: 'filial_uf', rotulo: 'Filial' },
+    { campo: 'fluxo', rotulo: 'E/S', mapa: FLUXO },
+    { campo: 'part_nome', rotulo: 'Cliente / fornecedor', corta: 26 },
+    { campo: 'part_uf', rotulo: 'UF' },
+    { campo: 'cod', rotulo: 'Código', mono: true },
+    { campo: 'descr', rotulo: 'Produto', desc: true, corta: 38 },
+    { campo: 'ncm', rotulo: 'NCM', mono: true },
+    { campo: 'cfop', rotulo: 'CFOP', mono: true },
+    { campo: 'cst', rotulo: 'CST', mono: true },
+    { campo: 'orig', rotulo: 'Origem', det: true },
+    dinheiro('v_oper', 'Valor'),
+    ...COL_TRIB,
+    { campo: 'alertas', rotulo: 'Alertas', alertas: true },
+    { campo: 'nat_op', rotulo: 'Natureza', det: true, corta: 30 },
+    { campo: 'chave', rotulo: 'Chave', det: true, mono: true, exp: false },
+  ],
+  notas: [
+    { campo: 'dt', rotulo: 'Data', tipo: 'data' },
+    { campo: 'nota', rotulo: 'Nota', mono: true },
+    { campo: 'filial_uf', rotulo: 'Filial' },
+    { campo: 'fluxo', rotulo: 'E/S', mapa: FLUXO },
+    { campo: 'part_nome', rotulo: 'Cliente / fornecedor', corta: 30 },
+    { campo: 'part_uf', rotulo: 'UF' },
+    { campo: 'cfops', rotulo: 'CFOP', mono: true },
+    { campo: 'itens', rotulo: 'Itens', tipo: 'numero', soma: true },
+    dinheiro('v_oper', 'Valor'),
+    ...COL_TRIB.filter(c => c.tipo !== 'pct' && c.soma !== false),
+    aliq('carga', 'Carga'),
+    { campo: 'alertas', rotulo: 'Alertas', alertas: true },
+    { campo: 'nat_op', rotulo: 'Natureza', det: true, corta: 30 },
+    { campo: 'chave', rotulo: 'Chave', det: true, mono: true, exp: false },
+  ],
+  resumo: [
+    { campo: 'grupo', rotulo: 'Grupo', mono: true },
+    { campo: 'rotulo', rotulo: 'Descrição', desc: true, corta: 44 },
+    { campo: 'itens', rotulo: 'Itens', tipo: 'numero', soma: true },
+    { campo: 'notas', rotulo: 'Notas', tipo: 'numero' },
+    dinheiro('v_oper', 'Valor'),
+    ...COL_TRIB.filter(c => c.tipo !== 'pct' && c.soma !== false),
+    aliq('carga', 'Carga'),
+  ],
+  alertas: [
+    { campo: 'rotulo', rotulo: 'Alerta' },
+    { campo: 'itens', rotulo: 'Itens', tipo: 'numero' },
+    { campo: 'notas', rotulo: 'Notas', tipo: 'numero' },
+    dinheiro('v_oper', 'Valor das operações', { soma: false }),
+    dinheiro('tributos', 'Tributos envolvidos', { soma: false }),
+    { campo: 'explica', rotulo: 'O que é', desc: true },
+  ],
+};
+
+const EXPLICA = {
+  itens: `Uma linha por item de nota. Colunas de tributo que estão zeradas em tudo o
+    que foi filtrado <b>somem sozinhas</b> (ST, DIFAL, II…) e voltam quando houver
+    valor. Marque <i>bases e alíquotas</i> para ver base, alíquota e CST de cada
+    tributo. Clique numa linha para ver o item inteiro.`,
+  notas: `Uma linha por nota, somando os itens que passaram no filtro — se o filtro
+    deixou só parte da nota, só essa parte soma. Clique na nota para ver os itens.`,
+  resumo: `Os itens filtrados, somados pelo agrupamento escolhido ao lado. Clique numa
+    linha para filtrar por ela e ver os itens.`,
+  alertas: `O que a conferência apontou nos itens filtrados. Clique num alerta para ver
+    os itens dele.`,
+};
+
+/* ------------------------------------------------------------------ desenho */
+function celula(c, x) {
+  const v = x[c.campo];
+  if (c.alertas) {
+    const a = (v || []).filter(k => k !== 'sem_detalhe');
+    if ((v || []).includes('sem_detalhe')) return `<td><span class="chip">sem detalhe</span></td>`;
+    return `<td>${a.length ? `<span class="chip warn" title="${esc(a.map(k => ALERTAS[k] || k).join('\n'))}">${n(a.length)} alerta${a.length > 1 ? 's' : ''}</span>` : vazio}</td>`;
+  }
+  if (c.tipo === 'data') return `<td class="mono">${v ? brDate(v) : vazio}</td>`;
+  if (c.tipo === 'dinheiro') return `<td class="num${c.forte ? ' forte' : ''}">${nada(v) || (!+v && c.soma !== false && !c.forte) ? vazio : money(v)}</td>`;
+  if (c.tipo === 'pct') return `<td class="num">${nada(v) ? vazio : pc(v)}</td>`;
+  if (c.tipo === 'numero') return `<td class="num">${nada(v) ? vazio : qt(v)}</td>`;
+  const t = c.mapa ? (c.mapa[v] || v) : v;
+  if (nada(t)) return `<td>${vazio}</td>`;
+  const s = String(t);
+  return `<td class="${c.mono ? 'mono' : ''}${c.desc ? ' desc' : ''}" title="${esc(s)}">${esc(c.corta ? s.slice(0, c.corta) : s)}</td>`;
+}
+
+function porNota(xs) {
+  const m = new Map();
+  xs.forEach(l => {
+    let g = m.get(l.nfe_id);
+    if (!g) {
+      g = { nfe_id: l.nfe_id, dt: l.dt, nota: l.nota, chave: l.chave, filial_uf: l.filial_uf,
+            fluxo: l.fluxo, part_nome: l.part_nome, part_doc: l.part_doc, part_uf: l.part_uf,
+            nat_op: l.nat_op, situacao: l.situacao, itens: 0, cfopSet: new Set(), alertaSet: new Set(),
+            linhas: [] };
+      SOMAS.forEach(c => g[c] = 0);
+      m.set(l.nfe_id, g);
+    }
+    g.itens++; g.linhas.push(l); g.cfopSet.add(l.cfop);
+    l.alertas.forEach(a => g.alertaSet.add(a));
+    SOMAS.forEach(c => g[c] += +l[c] || 0);
+  });
+  return [...m.values()].map(g => {
+    g.cfops = [...g.cfopSet].sort().join(', ');
+    g.alertas = [...g.alertaSet];
+    g.carga = g.v_oper > 0 ? 100 * g.tributos / g.v_oper : null;
+    return g;
+  });
+}
+
+const GRUPOS = {
+  cfop: { val: l => l.cfop || '—', rot: v => NAT_DO_CFOP[v] || '', faceta: 'cfop' },
+  ncm: { val: l => l.ncm || '—', rot: v => DESC_DO_NCM[v] || '', faceta: 'ncm' },
+  cst: { val: l => l.cst || 'sem CST', rot: () => '', faceta: 'cst' },
+  aliq: { val: l => +l.icms_v > 0 ? pc(l.icms_p) : 'sem ICMS', rot: () => '', faceta: 'aliq' },
+  mes: { val: l => l.mes || '—', rot: v => { const [a, m] = v.split('-'); return m ? `${m}/${a}` : ''; } },
+  part: { val: l => l.part_doc || l.part_nome || '—', rot: (v, l) => l.part_nome || '' },
+  part_uf: { val: l => l.part_uf || '—', rot: () => '', faceta: 'uf' },
+  filial: { val: l => l.filial_uf || '—', rot: () => '', faceta: 'filial' },
+  operacao: { val: l => l.operacao, rot: v => OPERACAO[v] || '', faceta: 'operacao' },
+  nat_op: { val: l => l.nat_op || '—', rot: () => '' },
+  orig: { val: l => nada(l.orig) ? '—' : String(l.orig), rot: v => ORIGEM[v] || '' },
+};
+
+function porGrupo(xs, dim) {
+  const g = GRUPOS[dim], m = new Map();
+  xs.forEach(l => {
+    const k = g.val(l);
+    let x = m.get(k);
+    if (!x) { x = { grupo: k, rotulo: g.rot(k, l), itens: 0, notaSet: new Set() }; SOMAS.forEach(c => x[c] = 0); m.set(k, x); }
+    x.itens++; x.notaSet.add(l.nfe_id);
+    SOMAS.forEach(c => x[c] += +l[c] || 0);
+  });
+  return [...m.values()].map(x => {
+    x.notas = x.notaSet.size;
+    x.carga = x.v_oper > 0 ? 100 * x.tributos / x.v_oper : null;
+    return x;
+  });
+}
+
+function porAlerta(xs) {
+  return Object.keys(ALERTAS).map(k => {
+    const ls = xs.filter(l => l.alertas.includes(k));
+    const t = totais(ls);
+    return { codigo: k, rotulo: ALERTAS[k], itens: ls.length, notas: t.notas,
+             v_oper: t.v_oper, tributos: t.tributos,
+             explica: (EXPLICA_ALERTA[k] || '').replace(/\s+/g, ' ').trim() };
+  }).filter(x => x.itens);
+}
+
+function desenhar(doInicio) {
+  filtradas = todas.filter(l => passa(l));
+  kpis(filtradas.filter(l => l.situacao !== 'cancelada'));
+  $('explica').innerHTML = EXPLICA[aba];
+  $('agrupar').hidden = aba !== 'resumo';
+
+  let xs = aba === 'itens' ? filtradas.slice()
+         : aba === 'notas' ? porNota(filtradas)
+         : aba === 'resumo' ? porGrupo(filtradas, $('agrupar').value)
+         : porAlerta(filtradas);
+  const detalhe = $('f-detalhe').checked;
+  // Coluna de tributo zerada em tudo o que foi filtrado não ocupa a tela.
+  const temValor = c => xs.some(x => +x[c.campo]);
+  colunasVistas = COLUNAS[aba].filter(c => (!c.det || detalhe) && (!c.auto || temValor(c)));
+
+  const [campo, dir] = ordem[aba];
+  const col = COLUNAS[aba].find(c => c.campo === campo) || {};
+  const numerico = ['dinheiro', 'pct', 'numero'].includes(col.tipo);
+  xs.sort((a, b) => {
+    const va = a[campo], vb = b[campo];
+    if (nada(va) || nada(vb)) return nada(va) === nada(vb) ? 0 : nada(va) ? 1 : -1;
+    return dir * (numerico ? (+va - +vb) : String(va).localeCompare(String(vb), 'pt-BR', { numeric: true }));
+  });
+  vistas = xs;
+  if (doInicio) mostradas = LOTE;
+
+  const t = $('tbl');
+  t.querySelector('thead').innerHTML = '<tr>' + colunasVistas.map(c => `
+    <th class="ord${['dinheiro', 'pct', 'numero'].includes(c.tipo) ? ' num' : ''}${c.desc ? ' desc' : ''}"
+        data-campo="${c.campo}">${esc(c.rotulo)}${c.campo === campo
+          ? `<span class="seta">${dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`).join('') + '</tr>';
+  const pedaco = xs.slice(0, mostradas);
+  t.querySelector('tbody').innerHTML = pedaco.length
+    ? pedaco.map((x, i) => `<tr class="clic${x.situacao === 'cancelada' ? ' cancelada' : ''}" data-i="${i}">` +
+        colunasVistas.map(c => celula(c, x)).join('') + '</tr>').join('')
+    : `<tr><td colspan="${colunasVistas.length}" class="skel">nada com esses filtros</td></tr>`;
+
+  const velho = t.querySelector('tfoot'); if (velho) velho.remove();
+  if (xs.length && aba !== 'alertas') {
+    const tot = totais(aba === 'itens' ? xs : filtradas);
+    let primeiro = true;
+    t.insertAdjacentHTML('beforeend', '<tfoot><tr>' + colunasVistas.map(c => {
+      if (c.campo === 'carga') return `<td class="num">${tot.carga === null ? '' : pc(tot.carga)}</td>`;
+      if (c.soma) {
+        const s = c.campo === 'itens' ? xs.reduce((a, x) => a + (+x.itens || 0), 0)
+                                      : xs.reduce((a, x) => a + (+x[c.campo] || 0), 0);
+        return `<td class="num">${c.tipo === 'dinheiro' ? money(s) : qt(s)}</td>`;
+      }
+      if (primeiro) { primeiro = false; return `<td>${n(xs.length)}</td>`; }
+      return '<td></td>';
+    }).join('') + '</tr></tfoot>');
+  }
+
+  $('mais').hidden = xs.length <= mostradas;
+  $('mais').textContent = `Mostrar mais ${n(Math.min(LOTE, xs.length - mostradas))} (${n(xs.length - mostradas)} restantes)`;
+  const total = todas.filter(l => $('f-canceladas').checked || l.situacao !== 'cancelada').length;
+  const nome = { itens: 'itens', notas: 'notas', resumo: 'grupos', alertas: 'tipos de alerta' }[aba];
+  $('resumo-filtro').textContent = `${n(xs.length)} ${nome}` +
+    (aba !== 'itens' ? ` · ${n(filtradas.length)} itens` : '') +
+    (filtradas.length < total ? ` — filtrado de ${n(total)} itens` : '') +
+    (xs.length > mostradas ? ` · mostrando ${n(mostradas)}; totais e exportação valem para todas` : '');
+
+  const qtd = { itens: filtradas.length, notas: new Set(filtradas.map(l => l.nfe_id)).size,
+                alertas: filtradas.filter(l => l.alertas.some(a => a !== 'sem_detalhe')).length };
+  $('abas').querySelectorAll('[data-aba]').forEach(b => {
+    const base = b.textContent.replace(/\s*\(.*\)$/, '');
+    b.innerHTML = esc(base) + (qtd[b.dataset.aba] !== undefined ? `<span class="qt">(${n(qtd[b.dataset.aba])})</span>` : '');
+    b.classList.toggle('on', b.dataset.aba === aba);
+  });
+}
+
+/* ------------------------------------------------------- detalhe ao clicar */
+const linhaDet = (rot, v) => nada(v) || v === '—' ? '' : `<dt>${esc(rot)}</dt><dd>${v}</dd>`;
+function bloco(titulo, linhas) {
+  const corpo = linhas.join('');
+  return corpo ? `<div class="card"><div class="lbl">${esc(titulo)}</div><dl>${corpo}</dl></div>` : '';
+}
+const m$ = v => nada(v) ? '' : money(v);
+const p$ = v => nada(v) ? '' : pc(v);
+
+function conferenciaImportacao(l) {
+  if (nada(l.nota_ipi_calc) && nada(l.nota_pis_calc)) return '';
+  return bloco('Conferência da nota (importação)', [
+    linhaDet('IPI calculado', m$(l.nota_ipi_calc)), linhaDet('IPI destacado', m$(l.nota_ipi_dest)),
+    linhaDet('PIS calculado', m$(l.nota_pis_calc)), linhaDet('PIS destacado', m$(l.nota_pis_dest)),
+    linhaDet('COFINS calculada', m$(l.nota_cofins_calc)), linhaDet('COFINS destacada', m$(l.nota_cofins_dest)),
+  ]);
+}
+
+function abrirItem(l) {
+  const p = abrirPainel(`Nota ${esc(l.nota)} · item ${esc(l.n_item || '')}`,
+    `${brDate(l.dt)} · ${esc(FLUXO[l.fluxo] || '')} · ${esc(l.part_nome || '')}`);
+  const al = l.alertas.map(k => `<div style="margin:0 0 8px"><span class="chip warn">${esc(ALERTAS[k] || k)}</span>
+      <div class="muted" style="font-size:12.5px;margin-top:4px;line-height:1.5">${esc((EXPLICA_ALERTA[k] || '').replace(/\s+/g, ' '))}</div></div>`).join('');
+  p.corpo.innerHTML = (al ? `<div class="card alert" style="margin-bottom:12px">${al}</div>` : '') +
+    `<div class="det">` +
+    bloco('Item', [
+      linhaDet('Código', esc(l.cod)), linhaDet('Produto', esc(l.descr)), linhaDet('NCM', esc(l.ncm)),
+      linhaDet('CEST', esc(l.cest)), linhaDet('CFOP', esc(l.cfop + (NAT_DO_CFOP[l.cfop] ? ' · ' + NAT_DO_CFOP[l.cfop] : ''))),
+      linhaDet('Quantidade', nada(l.qtd) ? '' : qt(l.qtd) + ' ' + esc(l.unid || '')),
+      linhaDet('Valor unitário', m$(l.v_unit)), linhaDet('Valor dos produtos', m$(l.v_prod)),
+      linhaDet('Desconto', m$(l.v_desc)), linhaDet('Valor da operação', m$(l.v_oper)),
+    ]) +
+    bloco('Nota', [
+      linhaDet('Número/série', esc(l.nota)), linhaDet('Data', brDate(l.dt)),
+      linhaDet('Natureza', esc(l.nat_op)), linhaDet('Filial', esc(l.filial_uf)),
+      linhaDet('Emitida pela filial', l.propria ? 'sim' : 'não — recebida de terceiro'),
+      linhaDet('Transferência entre filiais', l.transferencia ? 'sim' : ''),
+      linhaDet('Outra parte', esc((l.part_nome || '') + (l.part_doc ? ' · ' + l.part_doc : ''))),
+      linhaDet('Rota', esc(`${l.uf_orig || '?'} → ${l.uf_dest || '?'} · ${OPERACAO[l.operacao] || ''}`)),
+      linhaDet('Situação', esc(l.situacao)),
+      linhaDet('Chave', `<span class="mono" style="font-size:11px">${esc(l.chave)}</span>`),
+    ]) +
+    bloco('ICMS', [
+      linhaDet('Grupo', esc(l.icms_grupo)), linhaDet('Origem', esc(ORIGEM[l.orig] || l.orig)),
+      linhaDet('CST / CSOSN', esc(l.cst)), linhaDet('Base', m$(l.icms_vbc)), linhaDet('Alíquota', p$(l.icms_p)),
+      linhaDet('Alíquota padrão do NCM', p$(l.icms_p_padrao)),
+      linhaDet('Valor', m$(l.icms_v)), linhaDet('Desonerado', m$(l.icms_deson)),
+    ]) +
+    bloco('ICMS-ST e FCP', [
+      linhaDet('Base ST', m$(l.st_vbc)), linhaDet('Alíquota ST', p$(l.st_p)), linhaDet('ICMS-ST', m$(l.st_v)),
+      linhaDet('FCP-ST', m$(l.fcpst_v)), linhaDet('ST retido antes', m$(l.st_ret_v)),
+    ]) +
+    bloco('DIFAL', [
+      linhaDet('Base', m$(l.difal_vbc)), linhaDet('Alíquota destino', p$(l.difal_p_dest)),
+      linhaDet('Alíquota interestadual', p$(l.difal_p_inter)), linhaDet('DIFAL destino', m$(l.difal_v)),
+      linhaDet('FCP destino', m$(l.difal_fcp_v)), linhaDet('Parte do remetente', m$(l.difal_remet_v)),
+    ]) +
+    bloco('IPI e II', [
+      linhaDet('CST IPI', esc(l.ipi_cst)), linhaDet('Base IPI', m$(l.ipi_vbc)), linhaDet('Alíquota IPI', p$(l.ipi_p)),
+      linhaDet('Alíquota padrão do NCM', p$(l.ipi_p_padrao)),
+      linhaDet('IPI', m$(l.ipi_v)), linhaDet('Imposto de importação', m$(l.ii_v)),
+    ]) +
+    bloco('PIS e COFINS', [
+      linhaDet('CST PIS', esc(l.pis_cst)), linhaDet('Base PIS', m$(l.pis_vbc)), linhaDet('Alíquota PIS', p$(l.pis_p)),
+      linhaDet('PIS', m$(l.pis_v)), linhaDet('CST COFINS', esc(l.cofins_cst)), linhaDet('Base COFINS', m$(l.cofins_vbc)),
+      linhaDet('Alíquota COFINS', p$(l.cofins_p)), linhaDet('COFINS', m$(l.cofins_v)),
+    ]) +
+    bloco('IBS / CBS', [linhaDet('CST', esc(l.ibscbs_cst)), linhaDet('IBS', m$(l.ibs_v)), linhaDet('CBS', m$(l.cbs_v))]) +
+    conferenciaImportacao(l) +
+    bloco('Total', [linhaDet('Tributos destacados', m$(l.tributos)), linhaDet('Carga sobre o valor', p$(l.carga))]) +
+    `</div><p style="margin:14px 0 0"><button type="button" id="ver-nota">Ver a nota inteira</button></p>`;
+  p.corpo.querySelector('#ver-nota').onclick = () => {
+    p.fechar();
+    const g = porNota(todas.filter(x => x.nfe_id === l.nfe_id))[0];
+    if (g) abrirNota(g);
+  };
+}
+
+function abrirNota(g) {
+  const p = abrirPainel(`Nota ${esc(g.nota)}`,
+    `${brDate(g.dt)} · ${esc(FLUXO[g.fluxo] || '')} · ${esc(g.part_nome || '')} · ${esc(g.nat_op || '')}`);
+  const cols = COLUNAS.itens.filter(c => ['n_item', 'cod', 'descr', 'ncm', 'cfop', 'cst', 'v_oper', 'icms_p', 'icms_v',
+    'st_v', 'difal_v', 'ipi_v', 'ii_v', 'pis_v', 'cofins_v', 'tributos', 'alertas'].includes(c.campo))
+    .filter(c => !c.auto || g.linhas.some(x => +x[c.campo]));
+  const tot = totais(g.linhas);
+  const conf = conferenciaImportacao(g.linhas[0]);
+  p.corpo.innerHTML = (conf ? `<div class="det" style="margin-bottom:12px">${conf}</div>` : '') +
+    `<p class="muted" style="font-size:13px;margin:0 0 10px">${n(g.linhas.length)} item(ns) · valor
+      ${money(tot.v_oper)} · tributos ${money(tot.tributos)}${tot.carga === null ? '' : ` (${pc(tot.carga)})`} ·
+      chave <span class="mono">${esc(g.chave || '')}</span>. Clique num item para o detalhe.</p>
+    <div class="wrap"><table><thead><tr>${cols.map(c =>
+      `<th${['dinheiro', 'pct'].includes(c.tipo) ? ' class="num"' : ''}>${esc(c.rotulo)}</th>`).join('')}</tr></thead>
+    <tbody>${g.linhas.map((x, i) => `<tr class="clic" data-i="${i}">${cols.map(c => celula(c, x)).join('')}</tr>`).join('')}</tbody>
+    <tfoot><tr>${cols.map((c, i) => c.soma ? `<td class="num">${money(tot[c.campo] || 0)}</td>` : `<td>${i ? '' : 'Total'}</td>`).join('')}</tr></tfoot>
+    </table></div>`;
+  p.corpo.querySelector('tbody').onclick = e => {
+    const tr = e.target.closest('tr[data-i]');
+    if (!tr) return;
+    p.fechar();
+    abrirItem(g.linhas[+tr.dataset.i]);
+  };
+}
+
+/* ------------------------------------------------------------------ eventos */
+$('tbl').querySelector('thead').onclick = e => {
+  const th = e.target.closest('th[data-campo]');
+  if (!th) return;
+  const o = ordem[aba];
+  const col = COLUNAS[aba].find(c => c.campo === th.dataset.campo) || {};
+  const numerico = ['dinheiro', 'pct', 'numero'].includes(col.tipo);
+  ordem[aba] = o[0] === th.dataset.campo ? [o[0], -o[1]] : [th.dataset.campo, numerico ? -1 : 1];
+  desenhar(true);
+};
+$('tbl').querySelector('tbody').onclick = e => {
+  const tr = e.target.closest('tr[data-i]');
+  if (!tr) return;
+  const x = vistas[+tr.dataset.i];
+  if (!x) return;
+  if (aba === 'itens') return abrirItem(x);
+  if (aba === 'notas') return abrirNota(x);
+  if (aba === 'alertas') {
+    marcadas.alerta.clear(); marcadas.alerta.add(x.codigo);
+    aba = x.codigo.startsWith('importacao_') ? 'notas' : 'itens';
+    return mudou();
+  }
+  // Resumo: a linha vira filtro e a tela vai para os itens dela.
+  const dim = $('agrupar').value, g = GRUPOS[dim];
+  if (g.faceta) { marcadas[g.faceta].clear(); marcadas[g.faceta].add(x.grupo); }
+  else if (dim === 'mes') {
+    const [a, m] = x.grupo.split('-');
+    $('f-de').value = `${a}-${m}-01`;
+    $('f-ate').value = `${a}-${m}-${String(new Date(+a, +m, 0).getDate()).padStart(2, '0')}`;
+  } else $('q').value = x.grupo === '—' ? '' : x.grupo;
+  aba = 'itens';
+  mudou();
+};
+$('mais').onclick = () => { mostradas += LOTE; desenhar(false); };
+$('abas').querySelectorAll('[data-aba]').forEach(b => b.onclick = () => { aba = b.dataset.aba; desenhar(true); });
+$('agrupar').onchange = () => desenhar(true);
+
+let espera;
+const redesenhar = () => { clearTimeout(espera); espera = setTimeout(() => mudou(true), 200); };
+['q', 'f-min'].forEach(id => $(id).oninput = redesenhar);
+['f-de', 'f-ate', 'f-canceladas'].forEach(id => $(id).onchange = () => mudou(true));
+$('f-detalhe').onchange = () => desenhar(false);
+$('limpar').onclick = () => {
+  ['q', 'f-de', 'f-ate', 'f-min'].forEach(id => $(id).value = '');
+  $('f-canceladas').checked = false;
+  FACETAS.forEach(f => marcadas[f.id].clear());
+  $('atalhos').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.atalho === 'todas'));
+  mudou(true);
+};
+
+/* --------------------------------------------------------------- exportação */
+$('exportar').onclick = () => {
+  if (!vistas.length) return;
+  const rot = { itens: 'Impostos por item', notas: 'Impostos por nota',
+                resumo: 'Impostos ' + $('agrupar').selectedOptions[0].textContent,
+                alertas: 'Impostos — alertas' }[aba];
+  const filtros = [];
+  if ($('f-de').value || $('f-ate').value) filtros.push(`${$('f-de').value ? brDate($('f-de').value) : '…'} a ${$('f-ate').value ? brDate($('f-ate').value) : '…'}`);
+  FACETAS.forEach(f => { if (marcadas[f.id].size) filtros.push(`${f.rot}: ${[...marcadas[f.id]].map(v => (f.nome || (x => x))(v)).join(', ')}`); });
+  if ($('q').value.trim()) filtros.push(`busca "${$('q').value.trim()}"`);
+  const todasCols = COLUNAS[aba].filter(c => !c.auto || vistas.some(x => +x[c.campo]));
+  painelExportar({
+    titulo: rot,
+    subtitulo: `${n(vistas.length)} linhas` + (filtros.length ? ' · ' + filtros.join(' · ') : ' · sem filtro'),
+    aba: rot.slice(0, 28),
+    colunas: todasCols.map(c => ({
+      campo: c.alertas ? 'alertas_txt' : c.mapa ? c.campo + '_txt' : c.campo,
+      rotulo: c.tipo === 'pct' ? c.rotulo + ' (%)' : c.rotulo,
+      tipo: c.tipo === 'pct' ? 'numero' : (c.tipo || 'texto'), soma: !!c.soma && c.tipo === 'dinheiro',
+      // Sai marcado o que está na tela; o resto fica à mão no painel.
+      marcada: c.exp !== false && colunasVistas.includes(c) })),
+    linhas: vistas.map(x => {
+      const l = {};
+      todasCols.forEach(c => {
+        if (c.alertas) l.alertas_txt = (x.alertas || []).map(k => ALERTAS[k] || k).join('; ');
+        else if (c.mapa) l[c.campo + '_txt'] = c.mapa[x[c.campo]] || x[c.campo];
+        else l[c.campo] = x[c.campo];
+      });
+      return l;
+    }),
+  });
+};
+
+carregar();
+</script>
+</body>
+</html>
