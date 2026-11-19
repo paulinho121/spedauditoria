@@ -988,6 +988,12 @@ O extrato original nunca muda: o fechamento é uma camada por cima dele. Quem
 lê o relatório vê, no cabeçalho, quantas notas, produtos e quantidades foram
 mexidos naquela data.
 
+**As correções da posição final valem em todas as datas.** Uma quantidade que
+você corrigiu em *Posição final* (com *✎ Ajustar quantidades*) aparece igual em
+qualquer data escolhida. Para uma data específica ter outro número, corrija-a
+naquela data: a correção da data passa por cima da final, só ali. Desfazer a
+correção de uma data devolve o número da posição final, não o do extrato.
+
 #### Filtros
 
 Busca por código, produto, nota ou cliente · situação · período · natureza e

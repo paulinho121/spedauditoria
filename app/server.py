@@ -392,7 +392,12 @@ def _real_posicao(aid, data):
         "where l.arquivo_id = (select f.id from erp_saldo_arquivo f, erp_extrato_arquivo a "
         f"  where a.id = {aid} and f.vigente and f.cnpj is not distinct from a.cnpj "
         "  order by f.dt desc, f.id desc limit 1) order by l.seq")
-    fech = estoque_real.fechamento_de(_fechamento_linhas(aid, data))
+    # A correção feita na posição final vale em todas as datas; a correção de
+    # uma data passa por cima dela, só naquela data.
+    final = query("select cod_item, descr_item, campo, qtd from erp_real_ajuste "
+                  f"where arquivo_id = {aid}")
+    final = [dict(r, tipo="ajuste") for r in final]
+    fech = estoque_real.fechamento_de(final + _fechamento_linhas(aid, data))
     return estoque_real.posicao(_real_base(aid, data), data, foto, fech)
 
 

@@ -582,18 +582,23 @@ async function abrirAba(qual) {
     try {
       const [linhas, aj, fech] = await Promise.all([
         api(def.rota + '?id=' + encodeURIComponent(arquivoId) + qsData()),
-        qual === 'produtos' && !dataPos ? api('/api/real/ajustes?id=' + encodeURIComponent(arquivoId))
-                                        : Promise.resolve(null),
+        qual === 'produtos' ? api('/api/real/ajustes?id=' + encodeURIComponent(arquivoId))
+                            : Promise.resolve(null),
         dataPos ? api('/api/real/fechamento?id=' + encodeURIComponent(arquivoId) + qsData())
                 : Promise.resolve([])]);
       dados[qual] = linhas;
       fechamentoRows = fech || [];
-      if (dataPos && qual === 'produtos') {
-        ajustes = fechamentoRows.filter(x => x.tipo === 'ajuste').map(x => ({
-          cod_item: x.cod_item, descr_item: x.descr_item || '', campo: x.campo,
-          qtd: x.qtd, qtd_original: x.qtd_original }));
-      } else if (aj) ajustes = aj;
-      else if (qual === 'produtos') ajustes = [];
+      if (qual === 'produtos') {
+        // A correção da posição final vale nesta data também; a desta data, se
+        // existir, passa por cima dela.
+        const mapa = new Map();
+        (aj || []).forEach(x => mapa.set(`${x.cod_item}${x.descr_item || ''}${x.campo}`, x));
+        ajustesFinais = mapa.size;
+        fechamentoRows.filter(x => x.tipo === 'ajuste').forEach(x =>
+          mapa.set(`${x.cod_item}${x.descr_item || ''}${x.campo}`, x));
+        ajustes = [...mapa.values()].map(x => ({ cod_item: x.cod_item, descr_item: x.descr_item || '',
+          campo: x.campo, qtd: x.qtd, qtd_original: x.qtd_original }));
+      }
       atualizaFechamento();
     } catch (e) { return falha(e); }
     if (aba !== qual) return;            // trocou de aba enquanto carregava
@@ -884,6 +889,7 @@ function abrirNota(g) {
    Cada decisão fica guardada no banco, por data. Qualquer uma refaz a conta
    inteira; por isso a tela recarrega a aba depois de gravar.                 */
 let fechamentoRows = [];
+let ajustesFinais = 0;          // correções feitas na posição final, que valem nesta data
 const ROT_CAMPO = Object.fromEntries(COMPONENTES);
 
 /** Grava ou remove uma decisão do fechamento e recarrega a data. */
@@ -911,9 +917,12 @@ function atualizaFechamento() {
   const bt = $('fech-lista');
   bt.hidden = !dataPos;
   bt.textContent = `Decisões desta data (${n(fechamentoRows.length)})`;
-  if (dataPos) $('data-aviso').innerHTML = fechamentoRows.length
-    ? `Posição de ${brDate(dataPos)}: <b>${n(notas)}</b> nota(s) excluída(s), <b>${n(produtos)}</b> produto(s) excluído(s) e <b>${n(corr)}</b> quantidade(s) corrigida(s). Os totais já consideram tudo isso.`
-    : `Posição de ${brDate(dataPos)}: sem decisões. Os números são os do extrato.`;
+  if (dataPos) {
+    const finais = ajustesFinais ? ` Valem também as <b>${n(ajustesFinais)}</b> quantidade(s) corrigidas na posição final.` : '';
+    $('data-aviso').innerHTML = fechamentoRows.length
+      ? `Posição de ${brDate(dataPos)}: <b>${n(notas)}</b> nota(s) excluída(s), <b>${n(produtos)}</b> produto(s) excluído(s) e <b>${n(corr)}</b> quantidade(s) corrigida(s) nesta data.${finais} Os totais já consideram tudo isso.`
+      : `Posição de ${brDate(dataPos)}: sem decisões desta data.${finais || ' Os números são os do extrato.'}`;
+  }
 }
 
 /** Lista das decisões desta data, com o que é preciso para desfazer cada uma. */
@@ -1035,7 +1044,8 @@ $('desfazer').onclick = async () => {
                'As quantidades voltam a ser as do ERP.')) return;
   try {
     if (dataPos) {
-      for (const a of ajustes) {
+      // Só as correções desta data são desfeitas: as da posição final continuam.
+      for (const a of fechamentoRows.filter(x => x.tipo === 'ajuste')) {
         await apiPost('/api/real/fechamento', { acao: 'remover', tipo: 'ajuste', id: arquivoId,
           data: dataPos, cod: a.cod_item, descr: a.descr_item || '', campo: a.campo });
       }

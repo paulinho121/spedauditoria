@@ -315,7 +315,12 @@ def _real_posicao(aid, data):
             foto = consulta_rest_tudo("erp_saldo_linha", {
                 "arquivo_id": f"eq.{f[0]['id']}", "order": "seq",
                 "select": "cod_item,descr_item,ncm,custo_unit,qtd"})
-    fech = estoque_real.fechamento_de(_fechamento_linhas(aid, data))
+    # A correção feita na posição final vale em todas as datas; a correção de
+    # uma data passa por cima dela, só naquela data.
+    final = consulta_rest_tudo("erp_real_ajuste", {
+        "arquivo_id": f"eq.{aid}", "select": "cod_item,descr_item,campo,qtd"})
+    final = [dict(r, tipo="ajuste") for r in final]
+    fech = estoque_real.fechamento_de(final + _fechamento_linhas(aid, data))
     return estoque_real.posicao(_real_base(aid, data), data, foto, fech)
 
 

@@ -421,3 +421,24 @@ def test_chave_do_fechamento_e_estavel_e_separa_os_itens():
     assert a != er2.chave_fechamento("nota", doc="NFe 1 020", dt="2024-05-03", ntipo=VENDA, ent="C")
     assert er2.chave_fechamento("ajuste", cod="1", descr="x", campo="saldo_erp") != \
         er2.chave_fechamento("ajuste", cod="1", descr="x", campo="em_armazem")
+
+
+def test_correcao_da_posicao_final_vale_em_qualquer_data():
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 10, 0),
+                   ("2024-03-10", "NFe 1 002", COMPRA, "F", 5, 0))
+    final = [_rowf("ajuste", cod_item="100", descr_item="Refletor", campo="saldo_erp", qtd=0)]
+    em_fev = er2.posicao(base, "2024-02-28", None, er2.fechamento_de(final))["produtos"][0]
+    em_abr = er2.posicao(base, "2024-04-30", None, er2.fechamento_de(final))["produtos"][0]
+    assert em_fev["saldo_erp"] == 0 and em_fev["ajuste_orig"] == {"saldo_erp": 10.0}
+    assert em_abr["saldo_erp"] == 0 and em_abr["estoque_real"] == 0
+
+
+def test_correcao_de_uma_data_passa_por_cima_da_final():
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 10, 0))
+    final = [_rowf("ajuste", cod_item="100", descr_item="Refletor", campo="saldo_erp", qtd=0)]
+    naData = [_rowf("ajuste", cod_item="100", descr_item="Refletor", campo="saldo_erp", qtd=7)]
+    p = er2.posicao(base, "2024-02-28", None, er2.fechamento_de(final + naData))["produtos"][0]
+    assert p["saldo_erp"] == 7
+    # Sem a correção desta data, volta a valer a da posição final.
+    q = er2.posicao(base, "2024-02-28", None, er2.fechamento_de(final))["produtos"][0]
+    assert q["saldo_erp"] == 0
