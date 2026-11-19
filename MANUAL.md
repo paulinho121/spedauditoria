@@ -967,6 +967,27 @@ do relatório exportado diz a data.
 - Em data passada, o *Saldo ERP* é o saldo do depósito naquele dia, e não o
   saldo declarado pelo ERP na foto de hoje.
 
+#### Fechamento de um mês: corrigir e excluir numa data
+
+Para o relatório de fim de mês, escolha a data no campo **Estoque em** e corrija
+o que estiver errado naquele dia. Cada decisão fica guardada no sistema, por
+data — sobrevive a recarregar a página — e refaz a conta inteira.
+
+- **Excluir uma nota** (no detalhe da nota, ou no Kardex de um produto, na
+  coluna *Excluir nota*): tira a nota inteira do cálculo daquela data. Os itens
+  dela saem do estoque, do estoque real e dos totais. Use quando a nota foi
+  emitida por engano.
+- **Excluir um produto** (no Kardex, *Excluir este produto desta data*): o item
+  sai do relatório e dos totais daquela data.
+- **Corrigir uma quantidade** (*✎ Ajustar quantidades*): digite a quantidade
+  certa; o original do extrato fica guardado.
+- **Decisões desta data**: lista tudo o que foi excluído ou corrigido, com
+  *Reincluir* para desfazer cada item, ou *Limpar todas*.
+
+O extrato original nunca muda: o fechamento é uma camada por cima dele. Quem
+lê o relatório vê, no cabeçalho, quantas notas, produtos e quantidades foram
+mexidos naquela data.
+
 #### Filtros
 
 Busca por código, produto, nota ou cliente · situação · período · natureza e

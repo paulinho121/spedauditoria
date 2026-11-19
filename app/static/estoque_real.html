@@ -83,6 +83,7 @@ tr.alvo td { outline: 2px solid var(--primary); outline-offset: -2px; }
     <label class="muted" style="font-size:13px;display:flex;align-items:center;gap:6px">Estoque em
       <input type="date" id="data-pos" style="padding:6px 8px"></label>
     <button type="button" id="data-final">Posição final</button>
+    <button type="button" id="fech-lista" hidden>Decisões desta data</button>
     <span class="muted" id="data-aviso" style="font-size:12.5px"></span>
   </div>
 
@@ -417,7 +418,10 @@ function recalcular() {
   });
   xs.forEach(x => {
     // O que o extrato dá fica guardado à parte, uma vez só.
-    if (!x._o) x._o = Object.fromEntries(CAMPOS_COMP.map(c => [c, +x[c] || 0]));
+    // Numa data corrigida, o servidor já trouxe o número corrigido: o original
+    // do extrato vem em ajuste_orig.
+    if (!x._o) x._o = Object.fromEntries(CAMPOS_COMP.map(c =>
+      [c, x.ajuste_orig && c in x.ajuste_orig ? +x.ajuste_orig[c] : +x[c] || 0]));
     const aj = mapa.get(chaveProd(x)) || {}, txt = [];
     COMPONENTES.forEach(([c, rot]) => {
       x[c] = c in aj ? aj[c] : x._o[c];
@@ -465,9 +469,8 @@ function resumirComponentes() {
   $('editar').textContent = editando ? '✓ Concluir ajustes' : '✎ Ajustar quantidades';
   $('editar').classList.toggle('on', editando);
   // Ajuste foi feito sobre a posição final: numa data passada ele não se aplica.
-  if (dataPos) editando = false;
-  $('editar').hidden = !!dataPos;
-  $('desfazer').hidden = !ajustes.length || !!dataPos;
+  $('editar').hidden = false;
+  $('desfazer').hidden = !ajustes.length;
 }
 const marcados = { nat: new Set(), tipo: new Set() };   // vazio = todos
 
@@ -577,13 +580,21 @@ async function abrirAba(qual) {
   if (!dados[aba]) {
     $('tbl').querySelector('tbody').innerHTML = '<tr><td class="skel">carregando…</td></tr>';
     try {
-      const [linhas, aj] = await Promise.all([
+      const [linhas, aj, fech] = await Promise.all([
         api(def.rota + '?id=' + encodeURIComponent(arquivoId) + qsData()),
         qual === 'produtos' && !dataPos ? api('/api/real/ajustes?id=' + encodeURIComponent(arquivoId))
-                                        : Promise.resolve(null)]);
+                                        : Promise.resolve(null),
+        dataPos ? api('/api/real/fechamento?id=' + encodeURIComponent(arquivoId) + qsData())
+                : Promise.resolve([])]);
       dados[qual] = linhas;
-      if (aj) ajustes = aj;
-      else if (dataPos && qual === 'produtos') ajustes = [];
+      fechamentoRows = fech || [];
+      if (dataPos && qual === 'produtos') {
+        ajustes = fechamentoRows.filter(x => x.tipo === 'ajuste').map(x => ({
+          cod_item: x.cod_item, descr_item: x.descr_item || '', campo: x.campo,
+          qtd: x.qtd, qtd_original: x.qtd_original }));
+      } else if (aj) ajustes = aj;
+      else if (qual === 'produtos') ajustes = [];
+      atualizaFechamento();
     } catch (e) { return falha(e); }
     if (aba !== qual) return;            // trocou de aba enquanto carregava
   }
@@ -798,12 +809,13 @@ function rodape() {
 }
 
 /* ------------------------------------------------------- detalhe ao clicar */
-function tabelaKardex(ks, alvo) {
+function tabelaKardex(ks, alvo, excluir) {
   return `<div class="wrap"><table><thead><tr>
       <th>Data</th><th>Documento</th><th>Operação</th><th>Entidade</th>
       <th class="num">Entrada</th><th class="num">Saída</th><th class="num">Saldo</th>
       <th class="num" title="Saldo do terceiro depois da linha: o que foi menos o que voltou">Com o terceiro</th>
-    </tr></thead><tbody>` + ks.map(k => `
+      ${excluir ? '<th></th>' : ''}
+    </tr></thead><tbody>` + ks.map((k, i) => `
     <tr class="${+k.saldo < 0 ? 'linha-neg' : ''}${alvo && +k.seq === +alvo ? ' alvo' : ''}">
       <td class="mono">${brDate(k.dt)}</td><td class="mono">${esc(k.doc_texto || '—')}</td>
       <td>${esc(k.tipo || '—')}</td><td>${esc((k.entidade || '—').slice(0, 30))}</td>
@@ -811,6 +823,7 @@ function tabelaKardex(ks, alvo) {
       <td class="num">${+k.sai ? qt(k.sai) : vazio}</td>
       <td class="num${+k.saldo < 0 ? ' neg' : ''}"><b>${qt(k.saldo)}</b></td>
       <td class="num${+k.fora < 0 ? ' neg' : ''}">${k.fora === null || k.fora === undefined ? vazio : qt(k.fora)}</td>
+      ${excluir ? `<td>${k.doc_texto ? `<button type="button" data-nota="${i}" title="Tira esta nota do cálculo desta data">Excluir nota</button>` : ''}</td>` : ''}
     </tr>`).join('') + '</tbody></table></div>';
 }
 
@@ -821,10 +834,19 @@ async function abrirKardex(cod, descr, alvo) {
     const ks = await api(`/api/real/kardex?id=${encodeURIComponent(arquivoId)}` +
       `&cod=${encodeURIComponent(cod)}&descr=${encodeURIComponent(descr || '')}${qsData()}`);
     const neg = ks.filter(k => +k.saldo < 0).length;
+    const excluir = !!dataPos;
     p.corpo.innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.6">
         ${n(ks.length)} movimentos${neg ? ` · <b class="neg">${n(neg)} com o depósito negativo</b> (linhas marcadas)` : ''}.
         <b>Com o terceiro</b> é o saldo daquele armazém ou cliente depois da linha;
-        negativo ali é retorno sem remessa.</p>` + tabelaKardex(ks, alvo);
+        negativo ali é retorno sem remessa.</p>` +
+      (excluir ? `<p style="margin:0 0 12px"><button type="button" id="excl-produto">Excluir este produto desta data</button>
+        <span class="muted" style="font-size:12.5px">tira o item do relatório e dos totais desta data</span></p>` : '') +
+      tabelaKardex(ks, alvo, excluir);
+    if (excluir) p.corpo.onclick = e => {
+      if (e.target.id === 'excl-produto') { p.fechar(); return excluirProduto(cod, descr); }
+      const b = e.target.closest('button[data-nota]');
+      if (b) { const k = ks[+b.dataset.nota]; p.fechar(); excluirNota(k); }
+    };
     const el = p.corpo.querySelector('tr.alvo');
     if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
   } catch (e) {
@@ -850,6 +872,78 @@ function abrirNota(g) {
     const x = g.linhas[+tr.dataset.i];
     p.fechar();
     abrirKardex(x.cod_item, x.descr_item, x.seq);
+  };
+  if (dataPos) {
+    p.corpo.insertAdjacentHTML('beforeend', `<p style="margin:14px 0 0"><button type="button" id="excl-nota">Excluir esta nota desta data</button>
+      <span class="muted" style="font-size:12.5px">tira a nota inteira do cálculo: todos os itens dela saem do estoque desta data</span></p>`);
+    p.corpo.querySelector('#excl-nota').onclick = () => { p.fechar(); excluirNota(g); };
+  }
+}
+
+/* ----------------------------------- fechamento: excluir e corrigir por data
+   Cada decisão fica guardada no banco, por data. Qualquer uma refaz a conta
+   inteira; por isso a tela recarrega a aba depois de gravar.                 */
+let fechamentoRows = [];
+const ROT_CAMPO = Object.fromEntries(COMPONENTES);
+
+/** Grava ou remove uma decisão do fechamento e recarrega a data. */
+async function fechar(acao, tipo, campos) {
+  try {
+    const r = await apiPost('/api/real/fechamento',
+      Object.assign({ acao, tipo, id: arquivoId, data: dataPos }, campos));
+    if (r && r.erro) throw new Error(r.erro);
+  } catch (err) { return falha(err); }
+  await carregar(arquivoId);
+}
+const campoNota = g => ({ doc: g.doc_texto, dt: g.dt, ntipo: g.tipo, entidade: g.entidade || '' });
+const excluirNota = g => fechar('gravar', 'nota', campoNota(g));
+const excluirProduto = (cod, descr) => fechar('gravar', 'produto', { cod, descr: descr || '' });
+const reincluir = r => fechar('remover', r.tipo,
+  r.tipo === 'nota' ? { doc: r.doc_texto, dt: r.dt, ntipo: r.nota_tipo, entidade: r.entidade || '' }
+  : r.tipo === 'ajuste' ? { cod: r.cod_item, descr: r.descr_item || '', campo: r.campo }
+  : { cod: r.cod_item, descr: r.descr_item || '' });
+
+/** Botão e aviso da data: quantas decisões estão valendo. */
+function atualizaFechamento() {
+  const notas = fechamentoRows.filter(r => r.tipo === 'nota').length;
+  const produtos = fechamentoRows.filter(r => r.tipo === 'produto').length;
+  const corr = fechamentoRows.filter(r => r.tipo === 'ajuste').length;
+  const bt = $('fech-lista');
+  bt.hidden = !dataPos;
+  bt.textContent = `Decisões desta data (${n(fechamentoRows.length)})`;
+  if (dataPos) $('data-aviso').innerHTML = fechamentoRows.length
+    ? `Posição de ${brDate(dataPos)}: <b>${n(notas)}</b> nota(s) excluída(s), <b>${n(produtos)}</b> produto(s) excluído(s) e <b>${n(corr)}</b> quantidade(s) corrigida(s). Os totais já consideram tudo isso.`
+    : `Posição de ${brDate(dataPos)}: sem decisões. Os números são os do extrato.`;
+}
+
+/** Lista das decisões desta data, com o que é preciso para desfazer cada uma. */
+function abrirExcluidos() {
+  const p = abrirPainel('Decisões desta data', `Posição de ${brDate(dataPos)} · o que foi excluído ou corrigido`);
+  const linhaDe = r => {
+    const quem = r.feito_por ? ` · ${esc(r.feito_por)}` : '';
+    if (r.tipo === 'nota') return { cls: 'err', rot: 'Nota excluída',
+      txt: `${esc(r.doc_texto || '')} · ${brDate(r.dt)} · ${esc(r.entidade || '')}` + quem };
+    if (r.tipo === 'produto') return { cls: 'err', rot: 'Produto excluído',
+      txt: `${esc(r.cod_item)} · ${esc(r.descr_item || '')}` + quem };
+    return { cls: 'warn', rot: 'Quantidade corrigida',
+      txt: `${esc(r.cod_item)} · ${esc(r.descr_item || '')} · ${esc(ROT_CAMPO[r.campo] || r.campo)}: ` +
+           `${qt(r.qtd_original)} → ${qt(r.qtd)}` + quem };
+  };
+  const lista = fechamentoRows.map((r, i) => { const x = linhaDe(r); return `
+    <div class="card" style="margin:0 0 8px;padding:10px 12px;display:flex;gap:12px;align-items:center;justify-content:space-between">
+      <div><span class="chip ${x.cls}">${x.rot}</span> <span style="font-size:13px">${x.txt}</span></div>
+      <button type="button" data-i="${i}">Reincluir</button></div>`; }).join('');
+  p.corpo.innerHTML = (lista || '<div class="skel">Nada excluído nem corrigido nesta data.</div>') +
+    (fechamentoRows.length ? `<p style="margin:12px 0 0"><button type="button" id="fech-limpar">Limpar todas as decisões desta data</button></p>` : '');
+  p.corpo.onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.id === 'fech-limpar') {
+      if (!confirm('Apagar todas as exclusões e correções desta data? Os números voltam a ser os do extrato.')) return;
+      p.fechar();
+      return fechar('limpar', 'nota', {});
+    }
+    if (b.dataset.i !== undefined) { p.fechar(); reincluir(fechamentoRows[+b.dataset.i]); }
   };
 }
 
@@ -885,9 +979,11 @@ async function gravarAjuste(inp) {
   if (!desfaz && Math.abs(qtd - x[campo]) < 1e-9) return;        // nada mudou
   if (desfaz && !ajustada(x, campo)) { inp.value = x._o[campo]; return; }
   try {
-    const r = await apiPost('/api/real/ajustar', {
-      id: arquivoId, cod: x.cod_item, descr: x.descr_item || '', campo,
-      qtd: desfaz ? '' : qtd, qtd_original: x._o[campo] });
+    const corpoAj = { id: arquivoId, cod: x.cod_item, descr: x.descr_item || '', campo,
+      qtd: desfaz ? '' : qtd, qtd_original: x._o[campo] };
+    const r = dataPos
+      ? await apiPost('/api/real/fechamento', Object.assign({ acao: 'gravar', tipo: 'ajuste', data: dataPos }, corpoAj))
+      : await apiPost('/api/real/ajustar', corpoAj);
     if (r && r.erro) throw new Error(r.erro);
   } catch (err) {
     inp.value = x[campo];
@@ -937,8 +1033,16 @@ $('desfazer').onclick = async () => {
   if (!ajustes.length) return;
   if (!confirm(`Desfazer os ${ajustes.length} ajuste(s) manuais deste extrato? ` +
                'As quantidades voltam a ser as do ERP.')) return;
-  try { await apiPost('/api/real/desfazer-ajustes', { id: arquivoId }); }
-  catch (err) { return falha(err); }
+  try {
+    if (dataPos) {
+      for (const a of ajustes) {
+        await apiPost('/api/real/fechamento', { acao: 'remover', tipo: 'ajuste', id: arquivoId,
+          data: dataPos, cod: a.cod_item, descr: a.descr_item || '', campo: a.campo });
+      }
+      return carregar(arquivoId);
+    }
+    await apiPost('/api/real/desfazer-ajustes', { id: arquivoId });
+  } catch (err) { return falha(err); }
   ajustes = [];
   recalcular();
   desenhar(false);
@@ -987,6 +1091,7 @@ $('abas').querySelectorAll('[data-aba]').forEach(b => b.onclick = () => abrirAba
 $('arquivo').onchange = () => carregar($('arquivo').value);
 $('data-pos').onchange = () => { dataPos = $('data-pos').value || ''; carregar(arquivoId); };
 $('data-final').onclick = () => { dataPos = ''; carregar(arquivoId); };
+$('fech-lista').onclick = abrirExcluidos;
 
 /* --------------------------------------------------------------- exportação */
 $('exportar').onclick = () => {
@@ -999,6 +1104,10 @@ $('exportar').onclick = () => {
     titulo: 'Estoque real' + (dataPos ? ` em ${brDate(dataPos)}` : '') + ' — ' + titulo,
     subtitulo: (a ? a.textContent.replace(/\s+/g, ' ').trim() : '') +
                (dataPos ? ` · posição de ${brDate(dataPos)}` : ' · posição final') +
+               (dataPos && fechamentoRows.length
+                 ? ` · decisões: ${n(fechamentoRows.filter(r => r.tipo === 'nota').length)} nota(s) excluída(s), ` +
+                   `${n(fechamentoRows.filter(r => r.tipo === 'produto').length)} produto(s) excluído(s), ` +
+                   `${n(fechamentoRows.filter(r => r.tipo === 'ajuste').length)} quantidade(s) corrigida(s)` : '') +
                ` · ${n(vistas.length)} linhas` + (filtrar().length < total ? ' (com filtro)' : '') +
                // O relatório circula sem a tela: o que foi somado e o que foi
                // mexido à mão tem de estar escrito nele.

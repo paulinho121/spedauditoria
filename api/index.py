@@ -252,27 +252,25 @@ def _data_pos(qs):
 
 
 # A mesma data é pedida por várias abas seguidas; a conta fica guardada um pouco.
-_POSICOES = {}
+# A base do dia (vinte mil linhas) custa caro de buscar, então fica guardada um
+# pouco. O fechamento NÃO fica: é lido a cada pedido, para que uma mudança feita
+# em outra instância do servidor apareça na hora.
+_BASES = {}
 
 
-def _real_posicao(aid, data):
-    """
-    O estoque real numa data: os movimentos do extrato até o fim daquele dia,
-    lidos da base já calculada (erp_real_linha), e a mesma conta da posição
-    final — feita em auditoria/estoque_real.posicao.
-    """
+def _real_base(aid, data):
     import time
     from concurrent.futures import ThreadPoolExecutor
+    from auditoria import estoque_real
     chave = (aid, data)
-    hit = _POSICOES.get(chave)
+    hit = _BASES.get(chave)
     if hit and time.time() - hit[0] < 120:
         return hit[1]
-    _sobe_auditoria()
-    from auditoria import estoque_real
-    arq = consulta_rest("erp_extrato_arquivo", {"id": f"eq.{aid}", "select": "linhas,cnpj"})
+    arq = consulta_rest("erp_extrato_arquivo", {"id": f"eq.{aid}", "select": "linhas"})
     total = int((arq[0].get("linhas") if arq else 0) or 0)
     filtro = {"arquivo_id": f"eq.{aid}", "dt": f"lte.{data}",
               "select": estoque_real.COLUNAS_BASE, "order": "seq"}
+
     # Vinte mil linhas em páginas de mil, em paralelo: em série seriam vinte idas.
     # Quatro de cada vez — mais que isso o servidor derruba conexão — e a
     # página que cair é pedida de novo uma vez.
@@ -285,6 +283,29 @@ def _real_posicao(aid, data):
     with ThreadPoolExecutor(max_workers=4) as ex:
         partes = list(ex.map(pagina, range(0, max(total, 1), 1000)))
     base = [r for p in partes for r in p]
+    _BASES[chave] = (time.time(), base)
+    while len(_BASES) > 6:
+        _BASES.pop(next(iter(_BASES)))
+    return base
+
+
+def _fechamento_linhas(aid, data):
+    """As decisões do fechamento desta data, como estão guardadas."""
+    return consulta_rest_tudo("erp_fechamento", {
+        "arquivo_id": f"eq.{aid}", "data_ref": f"eq.{data}", "order": "id",
+        "select": "id,tipo,chave,cod_item,descr_item,campo,qtd,qtd_original,doc_texto,"
+                  "dt,nota_tipo,entidade,observacao,feito_por,feito_em"})
+
+
+def _real_posicao(aid, data):
+    """
+    O estoque real numa data: a base do dia, a foto do ERP (NCM e custo), e o
+    que o auditor fechou nesta data — notas e produtos excluídos, quantidades
+    corrigidas. A conta é a de estoque_real.posicao.
+    """
+    _sobe_auditoria()
+    from auditoria import estoque_real
+    arq = consulta_rest("erp_extrato_arquivo", {"id": f"eq.{aid}", "select": "cnpj"})
     foto = []
     cnpj = arq[0].get("cnpj") if arq else None
     if cnpj:
@@ -294,11 +315,40 @@ def _real_posicao(aid, data):
             foto = consulta_rest_tudo("erp_saldo_linha", {
                 "arquivo_id": f"eq.{f[0]['id']}", "order": "seq",
                 "select": "cod_item,descr_item,ncm,custo_unit,qtd"})
-    r = estoque_real.posicao(base, data, foto)
-    _POSICOES[chave] = (time.time(), r)
-    while len(_POSICOES) > 6:
-        _POSICOES.pop(next(iter(_POSICOES)))
-    return r
+    fech = estoque_real.fechamento_de(_fechamento_linhas(aid, data))
+    return estoque_real.posicao(_real_base(aid, data), data, foto, fech)
+
+
+def rota_real_fechamento(qs):
+    """As decisões do fechamento da data pedida (para a lista e para os totais)."""
+    aid = _real_arquivo(qs)
+    data = _data_pos(qs)
+    if not aid or not data:
+        return []
+    return _fechamento_linhas(aid, data)
+
+
+def post_real_fechamento(corpo, u):
+    """
+    Grava, remove ou limpa uma decisão do fechamento de uma data. A conta é
+    refeita no próximo pedido; nada é recalculado aqui.
+    """
+    from auditoria import estoque_real
+    b = corpo or {}
+    aid = int(b.get("id") or 0)
+    data = _data_pos({"data": [str(b.get("data") or "")]})
+    if not aid or not data:
+        raise Erro("escolha uma data")
+    try:
+        acao, p = estoque_real.montar_fechamento(b)
+    except ValueError as e:
+        raise Erro(str(e))
+    base = {"arquivo_id": aid, "data_ref": data}
+    if acao == "limpar":
+        return chama_rpc("erp_fechamento_limpar", base)
+    if acao == "remover":
+        return chama_rpc("erp_fechamento_remover", dict(base, chave=p["chave"]))
+    return chama_rpc("erp_fechamento_gravar", dict(base, **p, feito_por=_quem(u)))
 
 
 def rota_real(qs):
@@ -617,6 +667,7 @@ ROTAS = {
     "/api/real/terceiros": _real_lista("erp_real_em_terceiros", "dt,seq", "em_terceiros"),
     "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias", "dt,seq"),
     "/api/real/kardex": rota_real_kardex,
+    "/api/real/fechamento": rota_real_fechamento,
     "/api/impostos": rota_impostos,
     # Definida mais abaixo, junto dos POST de ajuste: só é resolvida na chamada.
     "/api/real/ajustes": lambda qs: rota_real_ajustes(qs),
@@ -813,6 +864,7 @@ POSTS = {"/api/trabalhos/usar": post_trabalho_usar,
          "/api/varrer": post_varrer,
          "/api/exportar": post_exportar,
          "/api/real/ajustar": post_real_ajustar,
+         "/api/real/fechamento": post_real_fechamento,
          "/api/real/desfazer-ajustes": post_real_desfazer_ajustes}
 
 

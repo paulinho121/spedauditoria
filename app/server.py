@@ -353,29 +353,84 @@ def _data_pos(qs):
     return d
 
 
-_POSICOES = {}
+# A base do dia fica guardada um pouco; o fechamento é lido a cada pedido.
+_BASES = {}
+
+
+def _real_base(aid, data):
+    import time
+    from auditoria import estoque_real
+    chave = (aid, data)
+    hit = _BASES.get(chave)
+    if hit and time.time() - hit[0] < 120:
+        return hit[1]
+    base = query(f"select {estoque_real.COLUNAS_BASE} from erp_real_linha "
+                 f"where arquivo_id = {aid} and dt <= '{data}' order by seq")
+    _BASES[chave] = (time.time(), base)
+    while len(_BASES) > 6:
+        _BASES.pop(next(iter(_BASES)))
+    return base
+
+
+def _fechamento_linhas(aid, data):
+    return query(
+        "select id, tipo, chave, cod_item, descr_item, campo, qtd, qtd_original, doc_texto, "
+        "       dt::text dt, nota_tipo, entidade, observacao, feito_por, "
+        "       to_char(feito_em, 'DD/MM/YYYY HH24:MI') feito_em "
+        f"from erp_fechamento where arquivo_id = {aid} and data_ref = '{data}' order by id")
 
 
 def _real_posicao(aid, data):
-    """O estoque real numa data: a conta de estoque_real.posicao sobre a base guardada."""
-    chave = (aid, data)
-    hit = _POSICOES.get(chave)
-    if hit and time.time() - hit[0] < 120:
-        return hit[1]
+    """
+    O estoque real numa data: a base do dia, a foto do ERP (NCM e custo) e o
+    que o auditor fechou nesta data. A conta é a de estoque_real.posicao.
+    """
     _sobe_auditoria()
     from auditoria import estoque_real
-    base = query(f"select {estoque_real.COLUNAS_BASE} from erp_real_linha "
-                 f"where arquivo_id = {aid} and dt <= '{data}' order by seq")
     foto = query(
         "select l.cod_item, l.descr_item, l.ncm, l.custo_unit, l.qtd from erp_saldo_linha l "
         "where l.arquivo_id = (select f.id from erp_saldo_arquivo f, erp_extrato_arquivo a "
         f"  where a.id = {aid} and f.vigente and f.cnpj is not distinct from a.cnpj "
         "  order by f.dt desc, f.id desc limit 1) order by l.seq")
-    r = estoque_real.posicao(base, data, foto)
-    _POSICOES[chave] = (time.time(), r)
-    while len(_POSICOES) > 6:
-        _POSICOES.pop(next(iter(_POSICOES)))
-    return r
+    fech = estoque_real.fechamento_de(_fechamento_linhas(aid, data))
+    return estoque_real.posicao(_real_base(aid, data), data, foto, fech)
+
+
+def real_fechamento(qs):
+    aid = _real_arquivo(qs)
+    data = _data_pos(qs)
+    if not aid or not data:
+        return []
+    return _fechamento_linhas(aid, data)
+
+
+def real_fechamento_post(body):
+    from auditoria import estoque_real
+    import getpass
+    b = body or {}
+    aid = int(b.get("id") or 0)
+    try:
+        data = _data_pos({"data": [str(b.get("data") or "")]})
+    except ValueError:
+        return {"erro": "data inválida — use AAAA-MM-DD"}
+    if not aid or not data:
+        return {"erro": "escolha uma data"}
+    try:
+        acao, p = estoque_real.montar_fechamento(b)
+    except ValueError as e:
+        return {"erro": str(e)}
+    base = {"arquivo_id": aid, "data_ref": data}
+    if acao == "limpar":
+        fn, payload = "erp_fechamento_limpar", base
+    elif acao == "remover":
+        fn, payload = "erp_fechamento_remover", dict(base, chave=p["chave"])
+    else:
+        quem = os.environ.get("AUDITOR") or getpass.getuser()
+        fn, payload = "erp_fechamento_gravar", dict(base, **p, feito_por=quem)
+    lit = json.dumps(payload, ensure_ascii=False).replace("'", "''")
+    r = query(f"select {fn}('{lit}'::jsonb) r")[0]["r"]
+    _cache.clear()
+    return json.loads(r) if isinstance(r, str) else r
 
 
 def _real_lista(funcao, chave=None):
@@ -829,6 +884,7 @@ def trabalho_excluir(body):
 POSTS = {"/api/import/pasta": importar_pasta, "/api/import/upload": importar_upload,
          "/api/exportar": exportar,
          "/api/real/ajustar": real_ajustar,
+         "/api/real/fechamento": real_fechamento_post,
          "/api/real/desfazer-ajustes": real_desfazer_ajustes,
          "/api/achados/status": mudar_status, "/api/varrer": rodar_varredura,
          "/api/trabalhos/usar": trabalho_usar, "/api/trabalhos/novo": trabalho_novo,
@@ -937,6 +993,7 @@ ROUTES = {
     "/api/real/terceiros": _real_lista("erp_real_em_terceiros", "em_terceiros"),
     "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias"),
     "/api/real/kardex": real_kardex,
+    "/api/real/fechamento": real_fechamento,
     "/api/impostos": impostos_tela,
     "/api/real/ajustes": real_ajustes,
     "/api/periodo/cfops": lambda qs: query(sql_conferencia_cfop(

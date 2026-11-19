@@ -341,3 +341,83 @@ def test_foto_do_erp_traz_ncm_e_custo_declarado_na_data():
     foto = [{"cod_item": "100", "descr_item": "Refletor", "ncm": "94054200", "custo_unit": 0, "qtd": 3}]
     p = er2.posicao(base, None, foto)["produtos"][0]
     assert p["ncm"] == "94054200" and p["custo_erp"] is None      # custo zero no ERP não vale
+
+
+# ------------------------------------------------------------- fechamento por data
+
+def _fech(*rows):
+    return er2.fechamento_de(list(rows))
+
+
+def _rowf(tipo, **k):
+    base = {"tipo": tipo, "cod_item": None, "descr_item": "", "campo": None, "qtd": None,
+            "doc_texto": None, "dt": None, "nota_tipo": None, "entidade": None}
+    base.update(k)
+    return base
+
+
+def test_excluir_nota_tira_os_movimentos_do_calculo():
+    base = base_de(
+        ("2024-01-10", "NFe 1 001", COMPRA, "Fornecedor", 10, 0),
+        ("2024-01-12", "NFe 1 099", VENDA, "Cliente errado", 0, 4),   # emitida por engano
+        ("2024-01-13", "NFe 1 002", VENDA, "Cliente", 0, 3))
+    antes = er2.posicao(base)["produtos"][0]
+    assert antes["saldo_erp"] == 3
+    f = _fech(_rowf("nota", doc_texto="NFe 1 099", dt="2024-01-12", nota_tipo=VENDA, entidade="Cliente errado"))
+    depois = er2.posicao(base, None, None, f)
+    assert depois["produtos"][0]["saldo_erp"] == 7
+    assert depois["resumo"]["excluidas_notas"] == 1
+    assert all(n["doc_texto"] != "NFe 1 099" for n in depois["sem_estoque"])
+
+
+def test_excluir_produto_tira_o_item_do_relatorio_e_do_total():
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 4, 0)) + \
+           base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 5, 0), cod="200", descr="Outro")
+    f = _fech(_rowf("produto", cod_item="200", descr_item="Outro"))
+    r = er2.posicao(base, None, None, f)
+    assert [p["cod_item"] for p in r["produtos"]] == ["100"]
+    assert r["resumo"]["estoque_real"] == 4 and r["resumo"]["produtos"] == 1
+    assert r["resumo"]["excluidos_produtos"] == 1
+
+
+def test_correcao_de_quantidade_refaz_o_estoque_e_o_valor_e_guarda_o_original():
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 10, 0))
+    base[0]["custo_entrada"] = 100.0
+    f = _fech(_rowf("ajuste", cod_item="100", descr_item="Refletor", campo="saldo_erp", qtd=7))
+    p = er2.posicao(base, None, None, f)["produtos"][0]
+    assert p["saldo_erp"] == 7 and p["estoque_real"] == 7 and p["valor_real"] == 70.0  # 10 un a R$ 10
+    assert p["ajuste_orig"] == {"saldo_erp": 10.0}
+    assert p["ajuste_orig"] is not None and "ajuste_orig" not in er2.posicao(base)["produtos"][0]
+
+
+def test_correcao_em_componente_terceiro_muda_o_que_esta_fora():
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 10, 0),
+                   ("2024-01-11", "NFe 1 002", SAIDA_ARMAZEM, "Sanco", 0, 6))
+    f = _fech(_rowf("ajuste", cod_item="100", descr_item="Refletor", campo="em_armazem", qtd=2))
+    p = er2.posicao(base, None, None, f)["produtos"][0]
+    assert p["em_terceiros"] == 2 and p["saldo_erp"] == 4 and p["estoque_real"] == 6
+
+
+def test_montar_fechamento_valida_e_normaliza():
+    acao, p = er2.montar_fechamento({"acao": "gravar", "tipo": "ajuste", "cod": "100",
+                                     "descr": "Refletor", "campo": "saldo_erp", "qtd": "4,5"})
+    assert acao == "gravar" and p["qtd"] == 4.5 and p["chave"] == er2.chave_fechamento(
+        "ajuste", cod="100", descr="Refletor", campo="saldo_erp")
+    acao, p = er2.montar_fechamento({"acao": "gravar", "tipo": "ajuste", "cod": "100", "campo": "saldo_erp", "qtd": ""})
+    assert acao == "remover"                       # quantidade vazia desfaz
+    acao, p = er2.montar_fechamento({"acao": "gravar", "tipo": "nota", "doc": "NFe 1 020",
+                                     "dt": "2024-05-02", "ntipo": VENDA, "entidade": "Cliente"})
+    assert acao == "gravar" and p["dt"] == "2024-05-02" and p["entidade"] == "Cliente"
+    assert er2.montar_fechamento({"acao": "limpar"}) == ("limpar", {})
+    for ruim in ({"tipo": "ajuste", "campo": "x", "qtd": 1}, {"tipo": "ajuste", "campo": "saldo_erp", "qtd": "abc"},
+                 {"tipo": "nota", "doc": ""}, {"tipo": "coisa"}, {"acao": "apagar_tudo", "tipo": "nota"}):
+        with pytest.raises(ValueError):
+            er2.montar_fechamento(ruim)
+
+
+def test_chave_do_fechamento_e_estavel_e_separa_os_itens():
+    a = er2.chave_fechamento("nota", doc="NFe 1 020", dt="2024-05-02", ntipo=VENDA, ent="C")
+    assert a == er2.chave_fechamento("nota", doc="NFe 1 020", dt="2024-05-02", ntipo=VENDA, ent="C")
+    assert a != er2.chave_fechamento("nota", doc="NFe 1 020", dt="2024-05-03", ntipo=VENDA, ent="C")
+    assert er2.chave_fechamento("ajuste", cod="1", descr="x", campo="saldo_erp") != \
+        er2.chave_fechamento("ajuste", cod="1", descr="x", campo="em_armazem")

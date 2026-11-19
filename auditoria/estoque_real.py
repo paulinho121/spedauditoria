@@ -40,6 +40,7 @@ rastro, e só o inventário físico mostra.
 Este módulo é a referência do cálculo: as funções do banco (erp_real_*) fazem a
 mesma conta, e os testes conferem a regra aqui.
 """
+import json
 import unicodedata
 from collections import Counter, OrderedDict, defaultdict
 
@@ -246,13 +247,15 @@ def _resumo(produtos, sem_estoque, sem_remessa, em_terceiros):
 
 # ------------------------------------------------------- a posição numa data
 #
-# A tela pede o estoque real "daquele dia". É a mesma conta de analisa(), feita
-# só com os movimentos até a data, sobre a base que o banco já guarda
-# (erp_real_linha: cada movimento com natureza e terceiro resolvidos). As
-# linhas saem no mesmo formato das funções erp_real_* — a tela não sabe se a
-# posição veio do banco ou daqui.
+# A tela pede o estoque real "daquele dia" e, para cada fechamento de mês, o
+# auditor pode corrigir quantidades e tirar do cálculo o que foi emitido de
+# forma errada. Tudo isso fica no banco (erp_fechamento), por data, e é
+# aplicado aqui na hora de montar a posição.
 
 TERCEIROS_OUTROS = ("exposicao", "conserto", "garantia")
+TERC_CAMPOS = ("em_armazem", "em_locacao", "em_comodato", "em_demonstracao", "em_outros")
+CAMPOS_FECHAMENTO = ("saldo_erp",) + TERC_CAMPOS
+TIPOS_FECHAMENTO = ("ajuste", "nota", "produto")
 
 
 def _linha_da_base(r):
@@ -304,18 +307,113 @@ def _ordem_cod(cod):
     return cod.rjust(20, "0") if cod.isdigit() else cod
 
 
-def posicao(base, data=None, foto=None):
+def _nk(doc, dt, tipo, ent):
+    """Identidade de uma nota: documento, data, operação e entidade — como a tela agrupa."""
+    return (str(doc or ""), str(dt or "")[:10], str(tipo or ""), str(ent or ""))
+
+
+def chave_fechamento(tipo, cod=None, descr=None, campo=None, doc=None, dt=None, ntipo=None, ent=None):
+    """
+    A chave de um item do fechamento. É ela que diz se dois pedidos são o mesmo
+    item: a mesma chave gravada de novo substitui, e a chave sem gravação remove.
+    """
+    if tipo == "ajuste":
+        partes = [cod or "", descr or "", campo or ""]
+    elif tipo == "produto":
+        partes = [cod or "", descr or ""]
+    elif tipo == "nota":
+        partes = list(_nk(doc, dt, ntipo, ent))
+    else:
+        raise ValueError("tipo de fechamento desconhecido")
+    return json.dumps([tipo] + partes, ensure_ascii=False)
+
+
+def fechamento_de(rows):
+    """
+    Das linhas guardadas do fechamento de uma data, o que a posição precisa:
+    as notas excluídas, os produtos excluídos e as quantidades corrigidas.
+    """
+    notas, produtos, ajustes = set(), set(), {}
+    for r in rows or []:
+        t = r.get("tipo")
+        if t == "nota":
+            notas.add(_nk(r.get("doc_texto"), r.get("dt"), r.get("nota_tipo"), r.get("entidade")))
+        elif t == "produto":
+            produtos.add((r.get("cod_item") or "", r.get("descr_item") or ""))
+        elif t == "ajuste" and r.get("qtd") not in (None, "") and r.get("campo") in CAMPOS_FECHAMENTO:
+            ajustes.setdefault((r.get("cod_item") or "", r.get("descr_item") or ""), {})[r["campo"]] = float(r["qtd"])
+    return {"notas": notas, "produtos": produtos, "ajustes": ajustes}
+
+
+def montar_fechamento(b):
+    """
+    O pedido da tela, conferido. Devolve (ação, dados): ação é 'gravar',
+    'remover' ou 'limpar'. Quantidade vazia num ajuste é pedido para remover.
+    """
+    acao = str(b.get("acao") or "gravar")
+    if acao not in ("gravar", "remover", "limpar"):
+        raise ValueError("ação desconhecida")
+    if acao == "limpar":
+        return acao, {}
+    tipo = str(b.get("tipo") or "")
+    if tipo not in TIPOS_FECHAMENTO:
+        raise ValueError("tipo de fechamento desconhecido")
+    p = {"tipo": tipo, "cod_item": str(b.get("cod") or ""), "descr_item": str(b.get("descr") or ""),
+         "campo": None, "qtd": None, "qtd_original": None, "doc_texto": None, "dt": None,
+         "nota_tipo": None, "entidade": "", "observacao": (str(b.get("obs") or "").strip()[:300] or None)}
+    if tipo == "ajuste":
+        campo = str(b.get("campo") or "")
+        if campo not in CAMPOS_FECHAMENTO:
+            raise ValueError("campo de ajuste desconhecido")
+        p["campo"] = campo
+        bruto = b.get("qtd")
+        if acao == "gravar":
+            if bruto in (None, ""):
+                acao = "remover"
+            else:
+                try:
+                    q = float(str(bruto).replace(",", "."))
+                except ValueError:
+                    raise ValueError("quantidade inválida")
+                if q != q or abs(q) > 1e9:
+                    raise ValueError("quantidade inválida")
+                p["qtd"] = q
+                orig = b.get("qtd_original")
+                p["qtd_original"] = None if orig in (None, "") else float(orig)
+    elif tipo == "nota":
+        doc = str(b.get("doc") or "")
+        if not doc:
+            raise ValueError("nota sem número")
+        p["doc_texto"] = doc
+        p["dt"] = str(b.get("dt") or "")[:10] or None
+        p["nota_tipo"] = str(b.get("ntipo") or "")
+        p["entidade"] = str(b.get("entidade") or "")
+    p["chave"] = chave_fechamento(tipo, cod=p["cod_item"], descr=p["descr_item"], campo=p["campo"],
+                                  doc=p["doc_texto"], dt=p["dt"], ntipo=p["nota_tipo"], ent=p["entidade"])
+    return acao, p
+
+
+def posicao(base, data=None, foto=None, fechamento=None):
     """
     base: linhas de erp_real_linha do extrato (qualquer ordem).
     data: 'AAAA-MM-DD' — só entram os movimentos até o fim desse dia. None = tudo.
     foto: linhas do saldo de produtos do ERP (cod_item, descr_item, ncm,
           custo_unit, qtd), para NCM e o custo que o ERP declara.
+    fechamento: o que o auditor fez nesta data (ver fechamento_de): notas e
+          produtos excluídos, quantidades corrigidas.
     Devolve produtos, as três listas de notas e o resumo, no formato da tela.
+    Quantidade corrigida traz 'ajuste_orig' com o valor que o extrato dava.
     """
     import datetime as _dt
+    fc = fechamento or {}
+    notas_x = fc.get("notas", set())
+    prod_x = fc.get("produtos", set())
+    aj = fc.get("ajustes", {})
+
     linhas = sorted((_linha_da_base(r) for r in base), key=lambda l: l["seq"])
     if data:
         linhas = [l for l in linhas if l["dt"] and l["dt"] <= data]
+    linhas = [l for l in linhas if _nk(l["doc_texto"], l["dt"], l["tipo"], l["entidade"]) not in notas_x]
     a = analisa(linhas)
     ref = data or max((l["dt"] for l in linhas if l["dt"]), default=None)
     dia = lambda s: _dt.date.fromisoformat(s[:10]) if s else None
@@ -330,7 +428,10 @@ def posicao(base, data=None, foto=None):
 
     produtos = []
     for p in a["produtos"]:
-        ls = por_prod[(p["cod_item"], p["descr_item"])]
+        key = (p["cod_item"], p["descr_item"])
+        if key in prod_x:
+            continue                                  # produto excluído do fechamento
+        ls = por_prod[key]
         nat = p["por_natureza"]
         custo, origem = _custo(ls)
         fs = foto_por.get(p["cod_item"]) or []
@@ -338,7 +439,7 @@ def posicao(base, data=None, foto=None):
         f = next((x for x in fs if (x.get("descr_item") or "") == p["descr_item"]), fs[0] if fs else {})
         cu = f.get("custo_unit")
         cu = float(cu) if cu not in (None, "") and float(cu) > 0 else None
-        produtos.append({
+        d = {
             "cod_item": p["cod_item"], "descr_item": p["descr_item"], "unid": p["unid"],
             "ncm": f.get("ncm"), "movimentos": p["movimentos"],
             "primeira": p["primeira"], "ultima": p["ultima"],
@@ -348,19 +449,35 @@ def posicao(base, data=None, foto=None):
             "em_armazem": nat.get("armazem", 0.0), "em_locacao": nat.get("locacao", 0.0),
             "em_comodato": nat.get("comodato", 0.0), "em_demonstracao": nat.get("demonstracao", 0.0),
             "em_outros": sum(nat.get(k, 0.0) for k in TERCEIROS_OUTROS),
-            "em_terceiros": p["em_terceiros"], "retorno_sem_remessa": p["retorno_sem_remessa"],
-            "falta_entrada": p["falta_entrada"], "estoque_real": p["estoque_real"],
+            "retorno_sem_remessa": p["retorno_sem_remessa"],
             "situacao": p["situacao"], "cadastros": cadastros[p["cod_item"]],
             "custo": round(float(custo), 4) if custo is not None else None, "custo_origem": origem,
             "custo_erp": round(cu, 4) if cu is not None else None,
-            "valor_real": _dinheiro(p["estoque_real"], custo) if custo is not None else None,
             "saldo_foto": None if f.get("qtd") in (None, "") else float(f["qtd"]),
-        })
-    produtos.sort(key=lambda p: (_ordem_cod(p["cod_item"]), p["descr_item"]))
+        }
+        # Correção do auditor: troca o número do extrato e refaz a conta.
+        corrigido = aj.get(key, {})
+        orig = {}
+        for campo, q in corrigido.items():
+            orig[campo] = d[campo]
+            d[campo] = q
+        if orig:
+            d["ajuste_orig"] = orig
+        d["em_terceiros"] = sum(d[c] for c in TERC_CAMPOS)
+        pos = d["saldo_erp"] + d["em_terceiros"]
+        d["estoque_real"] = max(pos, 0.0)
+        d["falta_entrada"] = max(-pos, 0.0)
+        d["valor_real"] = _dinheiro(d["estoque_real"], custo) if custo is not None else None
+        produtos.append(d)
+    produtos.sort(key=lambda x: (_ordem_cod(x["cod_item"]), x["descr_item"]))
+
+    keep = {(x["cod_item"], x["descr_item"]) for x in produtos}
 
     def lista(ns, extra):
         out = []
         for n in ns:
+            if (n["cod_item"], n["descr_item"]) not in keep:
+                continue
             x = dict(n)
             extra(x)
             out.append(x)
@@ -378,20 +495,22 @@ def posicao(base, data=None, foto=None):
     sem_remessa = lista(a["sem_remessa"], cobertura)
     em_terceiros = lista(a["em_terceiros"], fora)
 
-    r = dict(a["resumo"])
+    r = _resumo(produtos, sem_estoque, sem_remessa, em_terceiros)
     r.update({
         "data": data, "movimentos": len(linhas),
         "primeira": min((l["dt"] for l in linhas if l["dt"]), default=None),
         "ultima": max((l["dt"] for l in linhas if l["dt"]), default=None),
-        "em_armazem": sum(p["em_armazem"] for p in produtos),
-        "em_locacao": sum(p["em_locacao"] for p in produtos),
-        "em_comodato": sum(p["em_comodato"] for p in produtos),
-        "em_demonstracao": sum(p["em_demonstracao"] for p in produtos),
-        "em_outros": sum(p["em_outros"] for p in produtos),
-        "valor_real": round(sum(p["valor_real"] or 0 for p in produtos), 2),
-        "sem_custo": sum(1 for p in produtos if p["estoque_real"] > EPS and p["custo"] is None),
-        "situacoes": dict(Counter(p["situacao"] for p in produtos)),
-        "custo_por_compra": sum(1 for p in produtos if p["custo_origem"] == "compra"),
+        "em_armazem": sum(x["em_armazem"] for x in produtos),
+        "em_locacao": sum(x["em_locacao"] for x in produtos),
+        "em_comodato": sum(x["em_comodato"] for x in produtos),
+        "em_demonstracao": sum(x["em_demonstracao"] for x in produtos),
+        "em_outros": sum(x["em_outros"] for x in produtos),
+        "valor_real": round(sum(x["valor_real"] or 0 for x in produtos), 2),
+        "sem_custo": sum(1 for x in produtos if x["estoque_real"] > EPS and x["custo"] is None),
+        "situacoes": dict(Counter(x["situacao"] for x in produtos)),
+        "custo_por_compra": sum(1 for x in produtos if x["custo_origem"] == "compra"),
+        "excluidas_notas": len(notas_x), "excluidos_produtos": len(prod_x),
+        "ajustes": sum(len(v) for v in aj.values()),
     })
     return {"produtos": produtos, "sem_estoque": sem_estoque, "sem_remessa": sem_remessa,
             "em_terceiros": em_terceiros, "resumo": r}
