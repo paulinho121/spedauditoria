@@ -279,3 +279,65 @@ def test_extrato_grande_vai_em_partes_e_so_a_ultima_publica():
     assert [(x["arquivo"]["parte"], x["arquivo"]["partes"]) for x in ps] == [(1, 3), (2, 3), (3, 3)]
     assert all(x["arquivo"]["sha256"] == "abc" for x in ps)
     assert [l["seq"] for x in ps for l in x["linhas"]] == [0, 1, 2, 3, 4]    # nada some
+
+
+# ------------------------------------------------------------- a posição numa data
+
+from auditoria import estoque_real as er2
+
+
+def base_de(*movs, cod="100", descr="Refletor"):
+    """As linhas como erp_real_linha as devolve: o que posicao() lê."""
+    out = []
+    for n, (dt, doc, tipo, ent, e, s) in enumerate(movs, start=1):
+        out.append({"seq": n, "cod_item": cod, "descr_item": descr, "unid": "Un", "dt": dt,
+                    "doc_texto": doc, "doc_num": doc[-3:], "tipo": tipo, "entidade": ent,
+                    "ent": e, "sai": s, "saldo_impresso": None, "custo_entrada": None})
+    return out
+
+
+def test_posicao_na_data_ignora_o_que_veio_depois():
+    base = base_de(
+        ("2024-01-10", "NFe 1 001", COMPRA, "Fornecedor", 10, 0),
+        ("2024-01-11", "NFe 1 002", SAIDA_ARMAZEM, "Sanco", 0, 10),
+        ("2024-03-01", "NFe 2 003", ARMAZEM, "Sanco", 4, 0))
+    em_fev = er2.posicao(base, "2024-02-28")["produtos"][0]
+    assert (em_fev["saldo_erp"], em_fev["em_terceiros"], em_fev["estoque_real"]) == (0, 10, 10)
+    depois = er2.posicao(base, "2024-03-01")["produtos"][0]
+    # 4 voltaram ao depósito e 6 continuam no armazém: a posição é 10.
+    assert (depois["saldo_erp"], depois["em_terceiros"], depois["estoque_real"]) == (4, 6, 10)
+
+
+def test_posicao_sem_data_e_a_posicao_final():
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 4, 0),
+                   ("2024-01-12", "NFe 1 002", VENDA, "C", 0, 1))
+    assert er2.posicao(base)["produtos"][0]["estoque_real"] == 3
+
+
+def test_custo_da_posicao_vem_da_ultima_compra_ate_a_data():
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 2, 0),
+                   ("2024-02-10", "NFe 1 002", COMPRA, "F", 2, 0),
+                   ("2024-03-10", "NFe 1 003", COMPRA, "F", 2, 0))
+    for l, c in zip(base, (200.0, 300.0, 450.0)):
+        l["custo_entrada"] = c
+    assert er2.posicao(base, "2024-02-15")["produtos"][0]["custo"] == 150.0
+    assert er2.posicao(base, "2024-03-15")["produtos"][0]["custo"] == 225.0
+
+
+def test_valor_da_posicao_arredonda_como_o_banco():
+    """Meio centavo sobe, como o round() do banco: 10,005 vira 10,01, não 10,00."""
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 1, 0))
+    base[0]["custo_entrada"] = 10.005
+    p = er2.posicao(base)["produtos"][0]
+    assert p["valor_real"] == 10.01
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 12, 0))
+    base[0]["custo_entrada"] = 2191.09
+    p = er2.posicao(base)["produtos"][0]
+    assert p["valor_real"] == 2191.09 and p["custo"] == 182.5908
+
+
+def test_foto_do_erp_traz_ncm_e_custo_declarado_na_data():
+    base = base_de(("2024-01-10", "NFe 1 001", COMPRA, "F", 3, 0))
+    foto = [{"cod_item": "100", "descr_item": "Refletor", "ncm": "94054200", "custo_unit": 0, "qtd": 3}]
+    p = er2.posicao(base, None, foto)["produtos"][0]
+    assert p["ncm"] == "94054200" and p["custo_erp"] is None      # custo zero no ERP não vale

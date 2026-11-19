@@ -238,6 +238,69 @@ def _real_arquivo(qs):
     return aid
 
 
+def _data_pos(qs):
+    """A data da posição pedida (?data=AAAA-MM-DD). Sem data: a posição final."""
+    import datetime
+    d = (qs.get("data") or [""])[0].strip()
+    if not d:
+        return None
+    try:
+        datetime.date.fromisoformat(d)
+    except ValueError:
+        raise Erro("data inválida — use AAAA-MM-DD")
+    return d
+
+
+# A mesma data é pedida por várias abas seguidas; a conta fica guardada um pouco.
+_POSICOES = {}
+
+
+def _real_posicao(aid, data):
+    """
+    O estoque real numa data: os movimentos do extrato até o fim daquele dia,
+    lidos da base já calculada (erp_real_linha), e a mesma conta da posição
+    final — feita em auditoria/estoque_real.posicao.
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    chave = (aid, data)
+    hit = _POSICOES.get(chave)
+    if hit and time.time() - hit[0] < 120:
+        return hit[1]
+    _sobe_auditoria()
+    from auditoria import estoque_real
+    arq = consulta_rest("erp_extrato_arquivo", {"id": f"eq.{aid}", "select": "linhas,cnpj"})
+    total = int((arq[0].get("linhas") if arq else 0) or 0)
+    filtro = {"arquivo_id": f"eq.{aid}", "dt": f"lte.{data}",
+              "select": estoque_real.COLUNAS_BASE, "order": "seq"}
+    # Vinte mil linhas em páginas de mil, em paralelo: em série seriam vinte idas.
+    # Quatro de cada vez — mais que isso o servidor derruba conexão — e a
+    # página que cair é pedida de novo uma vez.
+    def pagina(off):
+        try:
+            return consulta_rest("erp_real_linha", dict(filtro, limit=1000, offset=off))
+        except Erro:
+            time.sleep(1)
+            return consulta_rest("erp_real_linha", dict(filtro, limit=1000, offset=off))
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        partes = list(ex.map(pagina, range(0, max(total, 1), 1000)))
+    base = [r for p in partes for r in p]
+    foto = []
+    cnpj = arq[0].get("cnpj") if arq else None
+    if cnpj:
+        f = consulta_rest("erp_saldo_arquivo", {"vigente": "is.true", "cnpj": f"eq.{cnpj}",
+                                                "order": "dt.desc,id.desc", "limit": 1, "select": "id"})
+        if f:
+            foto = consulta_rest_tudo("erp_saldo_linha", {
+                "arquivo_id": f"eq.{f[0]['id']}", "order": "seq",
+                "select": "cod_item,descr_item,ncm,custo_unit,qtd"})
+    r = estoque_real.posicao(base, data, foto)
+    _POSICOES[chave] = (time.time(), r)
+    while len(_POSICOES) > 6:
+        _POSICOES.pop(next(iter(_POSICOES)))
+    return r
+
+
 def rota_real(qs):
     """Os extratos disponíveis e os números do topo da tela Estoque real."""
     arqs = consulta_rest("erp_extrato_arquivo", {
@@ -247,18 +310,33 @@ def rota_real(qs):
     aid = _real_arquivo(qs)
     if not aid:
         return {"arquivos": arqs, "arquivo": None, "resumo": None}
+    res = chama_funcao("erp_real_resumo", {"p_arquivo_id": aid}) or {}
+    # O período do extrato inteiro, para a tela limitar a escolha da data.
+    res["primeira_extrato"], res["ultima_extrato"] = res.get("primeira"), res.get("ultima")
+    data = _data_pos(qs)
+    if data:
+        # Os números de posição passam a ser os da data; os que descrevem a
+        # qualidade do extrato (saídas sem custo…) continuam sendo do arquivo.
+        res.update(_real_posicao(aid, data)["resumo"])
+        inc = consulta_rest_tudo("rpc/erp_real_inconsistencias", {"p_arquivo_id": aid})
+        res["inconsistencias"] = sum(1 for x in inc if str(x.get("dt") or "") <= data)
     return {"arquivos": arqs,
             "arquivo": next((a for a in arqs if int(a["id"]) == aid), None),
-            "resumo": chama_funcao("erp_real_resumo", {"p_arquivo_id": aid})}
+            "resumo": res}
 
 
-def _real_lista(funcao, ordem):
+def _real_lista(funcao, ordem, chave=None):
     def rota(qs):
         aid = _real_arquivo(qs)
         if not aid:
             return []
-        return consulta_rest_tudo("rpc/" + funcao,
-                                  {"p_arquivo_id": aid, "order": ordem})
+        data = _data_pos(qs)
+        if data and chave:
+            return _real_posicao(aid, data)[chave]
+        linhas = consulta_rest_tudo("rpc/" + funcao, {"p_arquivo_id": aid, "order": ordem})
+        if data:
+            linhas = [x for x in linhas if str(x.get("dt") or "") <= data]
+        return linhas
     return rota
 
 
@@ -267,13 +345,16 @@ def rota_real_kardex(qs):
     aid = _real_arquivo(qs)
     if not aid:
         return []
-    return consulta_rest_tudo("erp_real_linha", {
-        "arquivo_id": f"eq.{aid}",
-        "cod_item": "eq." + (qs.get("cod") or [""])[0],
-        "descr_item": "eq." + (qs.get("descr") or [""])[0],
-        "select": "seq,dt,hora,doc_texto,tipo,natureza,entidade,ent,sai,saldo,"
-                  "saldo_impresso,fora,custo_entrada",
-        "order": "seq"})
+    p = {"arquivo_id": f"eq.{aid}",
+         "cod_item": "eq." + (qs.get("cod") or [""])[0],
+         "descr_item": "eq." + (qs.get("descr") or [""])[0],
+         "select": "seq,dt,hora,doc_texto,tipo,natureza,entidade,ent,sai,saldo,"
+                   "saldo_impresso,fora,custo_entrada",
+         "order": "seq"}
+    data = _data_pos(qs)
+    if data:
+        p["dt"] = f"lte.{data}"       # o Kardex até o dia escolhido
+    return consulta_rest_tudo("erp_real_linha", p)
 
 
 def rota_impostos(qs):
@@ -530,10 +611,10 @@ ROTAS = {
         "order": "dt.desc,importado_em.desc"}),
     "/api/erp/saldo": rota_erp_saldo,
     "/api/real": rota_real,
-    "/api/real/produtos": _real_lista("erp_real_produtos", "cod_item,descr_item"),
-    "/api/real/sem-estoque": _real_lista("erp_real_sem_estoque", "dt,seq"),
-    "/api/real/sem-remessa": _real_lista("erp_real_sem_remessa", "dt,seq"),
-    "/api/real/terceiros": _real_lista("erp_real_em_terceiros", "dt,seq"),
+    "/api/real/produtos": _real_lista("erp_real_produtos", "cod_item,descr_item", "produtos"),
+    "/api/real/sem-estoque": _real_lista("erp_real_sem_estoque", "dt,seq", "sem_estoque"),
+    "/api/real/sem-remessa": _real_lista("erp_real_sem_remessa", "dt,seq", "sem_remessa"),
+    "/api/real/terceiros": _real_lista("erp_real_em_terceiros", "dt,seq", "em_terceiros"),
     "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias", "dt,seq"),
     "/api/real/kardex": rota_real_kardex,
     "/api/impostos": rota_impostos,

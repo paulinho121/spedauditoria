@@ -41,7 +41,7 @@ Este módulo é a referência do cálculo: as funções do banco (erp_real_*) fa
 mesma conta, e os testes conferem a regra aqui.
 """
 import unicodedata
-from collections import OrderedDict, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 
 EPS = 1e-9
 
@@ -242,3 +242,161 @@ def _resumo(produtos, sem_estoque, sem_remessa, em_terceiros):
         "em_terceiros_linhas": len(em_terceiros), "em_terceiros_notas": docs(em_terceiros),
         "em_terceiros_qtd": sum(n["pendente"] for n in em_terceiros),
     }
+
+
+# ------------------------------------------------------- a posição numa data
+#
+# A tela pede o estoque real "daquele dia". É a mesma conta de analisa(), feita
+# só com os movimentos até a data, sobre a base que o banco já guarda
+# (erp_real_linha: cada movimento com natureza e terceiro resolvidos). As
+# linhas saem no mesmo formato das funções erp_real_* — a tela não sabe se a
+# posição veio do banco ou daqui.
+
+TERCEIROS_OUTROS = ("exposicao", "conserto", "garantia")
+
+
+def _linha_da_base(r):
+    """Uma linha de erp_real_linha no formato que analisa() lê."""
+    num = lambda v: float(v) if v not in (None, "") else 0.0
+    ent, sai = num(r.get("ent")), num(r.get("sai"))
+    return {"seq": int(r["seq"]), "abertura": False, "cod_item": r["cod_item"],
+            "descr_item": r.get("descr_item") or "", "unid": r.get("unid"),
+            "dt": str(r.get("dt") or "")[:10], "doc_texto": r.get("doc_texto"),
+            "doc_num": r.get("doc_num"), "tipo": r.get("tipo"), "entidade": r.get("entidade"),
+            "qtd_entrada": ent or None, "qtd_saida": sai or None,
+            "qtd_saldo": None if r.get("saldo_impresso") in (None, "") else float(r["saldo_impresso"]),
+            "custo_entrada": None if r.get("custo_entrada") in (None, "") else float(r["custo_entrada"])}
+
+
+def _custo(ls):
+    """
+    Custo unitário de um documento de entrada, como em erp_real_produtos: a
+    última COMPRA; sem compra, o último retorno de armazém; por fim, qualquer
+    entrada. O custo médio do extrato não serve (saída sem custo o infla).
+
+    Em Decimal, como o numeric do banco: com float, o valor de 35 produtos
+    saía um centavo diferente do que o banco calcula para a mesma conta.
+    """
+    from decimal import Decimal
+    for alvo in ("compra", "armazem", None):
+        for l in reversed(ls):
+            e, c = l.get("qtd_entrada") or 0, l.get("custo_entrada") or 0
+            if e > 0 and c > 0 and (alvo is None or natureza(l.get("tipo")) == alvo):
+                return Decimal(str(c)) / Decimal(str(e)), ("entrada" if alvo is None else alvo)
+    return None, None
+
+
+CASAS_CUSTO = 16     # a divisão numeric do banco tem pelo menos 16 casas
+
+
+def _dinheiro(qtd, custo):
+    """
+    qtd × custo, como o banco: o custo sai da divisão com 16 casas, e o produto
+    é arredondado a centavo, metade para cima. Sem as 16 casas, 3 de 1557
+    produtos saíam um centavo diferente do banco.
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+    c = custo.quantize(Decimal(1).scaleb(-CASAS_CUSTO), rounding=ROUND_HALF_UP)
+    return float((Decimal(str(qtd)) * c).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def _ordem_cod(cod):
+    return cod.rjust(20, "0") if cod.isdigit() else cod
+
+
+def posicao(base, data=None, foto=None):
+    """
+    base: linhas de erp_real_linha do extrato (qualquer ordem).
+    data: 'AAAA-MM-DD' — só entram os movimentos até o fim desse dia. None = tudo.
+    foto: linhas do saldo de produtos do ERP (cod_item, descr_item, ncm,
+          custo_unit, qtd), para NCM e o custo que o ERP declara.
+    Devolve produtos, as três listas de notas e o resumo, no formato da tela.
+    """
+    import datetime as _dt
+    linhas = sorted((_linha_da_base(r) for r in base), key=lambda l: l["seq"])
+    if data:
+        linhas = [l for l in linhas if l["dt"] and l["dt"] <= data]
+    a = analisa(linhas)
+    ref = data or max((l["dt"] for l in linhas if l["dt"]), default=None)
+    dia = lambda s: _dt.date.fromisoformat(s[:10]) if s else None
+
+    por_prod = defaultdict(list)
+    for l in linhas:
+        por_prod[(l["cod_item"], l["descr_item"])].append(l)
+    cadastros = Counter(p["cod_item"] for p in a["produtos"])
+    foto_por = defaultdict(list)
+    for f in foto or []:
+        foto_por[f["cod_item"]].append(f)
+
+    produtos = []
+    for p in a["produtos"]:
+        ls = por_prod[(p["cod_item"], p["descr_item"])]
+        nat = p["por_natureza"]
+        custo, origem = _custo(ls)
+        fs = foto_por.get(p["cod_item"]) or []
+        # Mesmo código em dois cadastros: casa primeiro pela descrição.
+        f = next((x for x in fs if (x.get("descr_item") or "") == p["descr_item"]), fs[0] if fs else {})
+        cu = f.get("custo_unit")
+        cu = float(cu) if cu not in (None, "") and float(cu) > 0 else None
+        produtos.append({
+            "cod_item": p["cod_item"], "descr_item": p["descr_item"], "unid": p["unid"],
+            "ncm": f.get("ncm"), "movimentos": p["movimentos"],
+            "primeira": p["primeira"], "ultima": p["ultima"],
+            "entradas": p["entradas"], "saidas": p["saidas"],
+            "saldo_erp": p["saldo_erp"], "saldo_impresso": p["saldo_impresso"],
+            "menor_saldo": p["menor_saldo"],
+            "em_armazem": nat.get("armazem", 0.0), "em_locacao": nat.get("locacao", 0.0),
+            "em_comodato": nat.get("comodato", 0.0), "em_demonstracao": nat.get("demonstracao", 0.0),
+            "em_outros": sum(nat.get(k, 0.0) for k in TERCEIROS_OUTROS),
+            "em_terceiros": p["em_terceiros"], "retorno_sem_remessa": p["retorno_sem_remessa"],
+            "falta_entrada": p["falta_entrada"], "estoque_real": p["estoque_real"],
+            "situacao": p["situacao"], "cadastros": cadastros[p["cod_item"]],
+            "custo": round(float(custo), 4) if custo is not None else None, "custo_origem": origem,
+            "custo_erp": round(cu, 4) if cu is not None else None,
+            "valor_real": _dinheiro(p["estoque_real"], custo) if custo is not None else None,
+            "saldo_foto": None if f.get("qtd") in (None, "") else float(f["qtd"]),
+        })
+    produtos.sort(key=lambda p: (_ordem_cod(p["cod_item"]), p["descr_item"]))
+
+    def lista(ns, extra):
+        out = []
+        for n in ns:
+            x = dict(n)
+            extra(x)
+            out.append(x)
+        out.sort(key=lambda x: (x["dt"] or "", x["seq"]))
+        return out
+
+    def cobertura(x):
+        x["situacao"] = "aberta" if x.get("coberta_em") is None else "coberta"
+        x["dias"] = (dia(x["coberta_em"]) - dia(x["dt"])).days if x.get("coberta_em") else None
+
+    def fora(x):
+        x["dias"] = (dia(ref) - dia(x["dt"])).days if ref and x["dt"] else None
+
+    sem_estoque = lista(a["sem_estoque"], cobertura)
+    sem_remessa = lista(a["sem_remessa"], cobertura)
+    em_terceiros = lista(a["em_terceiros"], fora)
+
+    r = dict(a["resumo"])
+    r.update({
+        "data": data, "movimentos": len(linhas),
+        "primeira": min((l["dt"] for l in linhas if l["dt"]), default=None),
+        "ultima": max((l["dt"] for l in linhas if l["dt"]), default=None),
+        "em_armazem": sum(p["em_armazem"] for p in produtos),
+        "em_locacao": sum(p["em_locacao"] for p in produtos),
+        "em_comodato": sum(p["em_comodato"] for p in produtos),
+        "em_demonstracao": sum(p["em_demonstracao"] for p in produtos),
+        "em_outros": sum(p["em_outros"] for p in produtos),
+        "valor_real": round(sum(p["valor_real"] or 0 for p in produtos), 2),
+        "sem_custo": sum(1 for p in produtos if p["estoque_real"] > EPS and p["custo"] is None),
+        "situacoes": dict(Counter(p["situacao"] for p in produtos)),
+        "custo_por_compra": sum(1 for p in produtos if p["custo_origem"] == "compra"),
+    })
+    return {"produtos": produtos, "sem_estoque": sem_estoque, "sem_remessa": sem_remessa,
+            "em_terceiros": em_terceiros, "resumo": r}
+
+
+# Colunas de erp_real_linha que posicao() lê.
+COLUNAS_BASE = ("seq,cod_item,descr_item,unid,dt,doc_texto,doc_num,tipo,entidade,"
+                "ent,sai,saldo_impresso,custo_entrada")

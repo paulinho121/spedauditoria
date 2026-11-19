@@ -330,15 +330,66 @@ def real_resumo(qs):
     if not aid:
         return {"arquivos": arqs, "arquivo": None, "resumo": None}
     r = query(f"select erp_real_resumo({aid}) r")[0]["r"]
+    res = dict(json.loads(r) if isinstance(r, str) else r)
+    res["primeira_extrato"], res["ultima_extrato"] = res.get("primeira"), res.get("ultima")
+    data = _data_pos(qs)
+    if data:
+        res.update(_real_posicao(aid, data)["resumo"])
+        res["inconsistencias"] = int(query(
+            f"select count(*) n from erp_real_inconsistencias({aid}) "
+            f"where dt <= '{data}'")[0]["n"])
     return {"arquivos": arqs,
             "arquivo": next((a for a in arqs if int(a["id"]) == aid), None),
-            "resumo": json.loads(r) if isinstance(r, str) else r}
+            "resumo": res}
 
 
-def _real_lista(funcao):
+def _data_pos(qs):
+    """A data da posição pedida (?data=AAAA-MM-DD). Sem data: a posição final."""
+    import datetime
+    d = (qs.get("data") or [""])[0].strip()
+    if not d:
+        return None
+    datetime.date.fromisoformat(d)          # ValueError vira erro 500 com o motivo
+    return d
+
+
+_POSICOES = {}
+
+
+def _real_posicao(aid, data):
+    """O estoque real numa data: a conta de estoque_real.posicao sobre a base guardada."""
+    chave = (aid, data)
+    hit = _POSICOES.get(chave)
+    if hit and time.time() - hit[0] < 120:
+        return hit[1]
+    _sobe_auditoria()
+    from auditoria import estoque_real
+    base = query(f"select {estoque_real.COLUNAS_BASE} from erp_real_linha "
+                 f"where arquivo_id = {aid} and dt <= '{data}' order by seq")
+    foto = query(
+        "select l.cod_item, l.descr_item, l.ncm, l.custo_unit, l.qtd from erp_saldo_linha l "
+        "where l.arquivo_id = (select f.id from erp_saldo_arquivo f, erp_extrato_arquivo a "
+        f"  where a.id = {aid} and f.vigente and f.cnpj is not distinct from a.cnpj "
+        "  order by f.dt desc, f.id desc limit 1) order by l.seq")
+    r = estoque_real.posicao(base, data, foto)
+    _POSICOES[chave] = (time.time(), r)
+    while len(_POSICOES) > 6:
+        _POSICOES.pop(next(iter(_POSICOES)))
+    return r
+
+
+def _real_lista(funcao, chave=None):
     def rota(qs):
         aid = _real_arquivo(qs)
-        return query(f"select * from {funcao}({aid})") if aid else []
+        if not aid:
+            return []
+        data = _data_pos(qs)
+        if data and chave:
+            return _real_posicao(aid, data)[chave]
+        linhas = query(f"select * from {funcao}({aid})")
+        if data:
+            linhas = [x for x in linhas if str(x.get("dt") or "") <= data]
+        return linhas
     return rota
 
 
@@ -352,7 +403,8 @@ def real_kardex(qs):
         "select seq, dt, hora, doc_texto, tipo, natureza, entidade, ent, sai, "
         "       saldo, saldo_impresso, fora, custo_entrada "
         f"from erp_real_linha where arquivo_id = {aid} "
-        f"and cod_item = {lit('cod')} and descr_item = {lit('descr')} order by seq")
+        f"and cod_item = {lit('cod')} and descr_item = {lit('descr')} "
+        + (f"and dt <= '{_data_pos(qs)}' " if _data_pos(qs) else "") + "order by seq")
 
 
 CAMPOS_AJUSTE = ("saldo_erp", "em_armazem", "em_locacao", "em_comodato",
@@ -879,10 +931,10 @@ ROUTES = {
     "/api/erp/saldos": erp_saldos,
     "/api/erp/saldo": erp_saldo,
     "/api/real": real_resumo,
-    "/api/real/produtos": _real_lista("erp_real_produtos"),
-    "/api/real/sem-estoque": _real_lista("erp_real_sem_estoque"),
-    "/api/real/sem-remessa": _real_lista("erp_real_sem_remessa"),
-    "/api/real/terceiros": _real_lista("erp_real_em_terceiros"),
+    "/api/real/produtos": _real_lista("erp_real_produtos", "produtos"),
+    "/api/real/sem-estoque": _real_lista("erp_real_sem_estoque", "sem_estoque"),
+    "/api/real/sem-remessa": _real_lista("erp_real_sem_remessa", "sem_remessa"),
+    "/api/real/terceiros": _real_lista("erp_real_em_terceiros", "em_terceiros"),
     "/api/real/inconsistencias": _real_lista("erp_real_inconsistencias"),
     "/api/real/kardex": real_kardex,
     "/api/impostos": impostos_tela,

@@ -949,6 +949,24 @@ O ajuste vale para **aquele extrato**. Se você importar um extrato novo do
 mesmo depósito, ele começa sem ajustes — os antigos continuam guardados no
 extrato anterior.
 
+#### Estoque em uma data
+
+O campo **Estoque em** (logo abaixo do extrato) mostra a posição de **qualquer
+dia** que o extrato cobre: escolha a data e todas as abas se refazem com a
+situação naquele momento. Só entram os movimentos até o fim do dia escolhido —
+o estoque real, as notas que precisam de entrada ou de saída, o que está em
+terceiros, o Kardex e a exportação passam a valer para aquela data. O cabeçalho
+do relatório exportado diz a data.
+
+- O calendário só deixa escolher dias que o extrato cobre.
+- *Posição final* volta ao extrato inteiro.
+- **Ajustes manuais valem só para a posição final.** Eles foram feitos sobre o
+  número de hoje; numa data passada o botão de ajustar fica oculto.
+- O custo de cada produto é o da última compra **até aquela data**, e não o de
+  hoje — o valor de um dia passado usa o que se sabia naquele dia.
+- Em data passada, o *Saldo ERP* é o saldo do depósito naquele dia, e não o
+  saldo declarado pelo ERP na foto de hoje.
+
 #### Filtros
 
 Busca por código, produto, nota ou cliente · situação · período · natureza e

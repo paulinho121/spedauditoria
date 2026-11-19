@@ -79,6 +79,12 @@ tr.alvo td { outline: 2px solid var(--primary); outline-offset: -2px; }
     <select id="arquivo"><option>carregando…</option></select>
     <span class="muted" id="arq-info"></span>
   </div>
+  <div class="controls" style="margin-top:8px">
+    <label class="muted" style="font-size:13px;display:flex;align-items:center;gap:6px">Estoque em
+      <input type="date" id="data-pos" style="padding:6px 8px"></label>
+    <button type="button" id="data-final">Posição final</button>
+    <span class="muted" id="data-aviso" style="font-size:12.5px"></span>
+  </div>
 
   <section class="grid kpis" id="kpis"><div class="skel">carregando…</div></section>
 
@@ -366,6 +372,9 @@ const ABAS = {
 
 /* -------------------------------------------------------------------- estado */
 let arquivoId = null, resumo = null, aba = 'produtos';
+// Data da posição (AAAA-MM-DD). Vazia = a posição final do extrato.
+let dataPos = '';
+const qsData = (sep = '&') => dataPos ? `${sep}data=${encodeURIComponent(dataPos)}` : '';
 const dados = {};                        // aba -> linhas (carregadas ao abrir)
 const ordem = {};                        // aba -> [campo, direção]
 let vistas = [], colunasVistas = [], colunasExport = [], mostradas = LOTE;
@@ -455,14 +464,17 @@ function resumirComponentes() {
                  (ou repetir o do extrato) desfaz o ajuste. O valor do extrato fica guardado.` : '');
   $('editar').textContent = editando ? '✓ Concluir ajustes' : '✎ Ajustar quantidades';
   $('editar').classList.toggle('on', editando);
-  $('desfazer').hidden = !ajustes.length;
+  // Ajuste foi feito sobre a posição final: numa data passada ele não se aplica.
+  if (dataPos) editando = false;
+  $('editar').hidden = !!dataPos;
+  $('desfazer').hidden = !ajustes.length || !!dataPos;
 }
 const marcados = { nat: new Set(), tipo: new Set() };   // vazio = todos
 
 /* ------------------------------------------------------------------- resumo */
 async function carregar(id) {
   let r;
-  try { r = await api('/api/real' + (id ? '?id=' + encodeURIComponent(id) : '')); }
+  try { r = await api('/api/real' + (id ? '?id=' + encodeURIComponent(id) : '') + qsData(id ? '&' : '?')); }
   catch (e) { return falha(e); }
   const arqs = r.arquivos || [];
   if (!arqs.length || !r.arquivo) {
@@ -474,6 +486,12 @@ async function carregar(id) {
   }
   const a = r.arquivo;
   arquivoId = a.id; resumo = r.resumo || {};
+  // O calendário só deixa escolher dias que o extrato cobre.
+  if (resumo.primeira_extrato) { $('data-pos').min = resumo.primeira_extrato; $('data-pos').max = resumo.ultima_extrato; }
+  $('data-pos').value = dataPos;
+  $('data-aviso').textContent = dataPos
+    ? `Posição de ${brDate(dataPos)}: só os movimentos até esse dia. Os ajustes manuais valem só para a posição final.`
+    : '';
   $('arquivo').innerHTML = arqs.map(x => `<option value="${x.id}"${+x.id === +a.id ? ' selected' : ''}>
       ${esc(x.deposito || '?')} · ${brDate(x.dt_ini)} a ${brDate(x.dt_fin)} ·
       ${n(x.linhas)} movimentos${x.vigente ? '' : ' (substituído)'}</option>`).join('');
@@ -485,7 +503,7 @@ async function carregar(id) {
     card('Estoque real', qt(s.estoque_real) + ' un',
          `${money(s.valor_real)} pelo custo da última compra · ${n(s.produtos)} produtos`),
     card('Saldo no ERP (depósito)', qt(s.saldo_erp) + ' un',
-         +s.negativos_hoje ? `${n(s.negativos_hoje)} produtos negativos hoje (−${qt(s.qtd_negativa_hoje)} un)`
+         +s.negativos_hoje ? `${n(s.negativos_hoje)} produtos negativos ${dataPos ? 'na data' : 'hoje'} (−${qt(s.qtd_negativa_hoje)} un)`
                            : 'nenhum produto negativo', +s.negativos_hoje ? 'alert' : ''),
     card('Em poder de terceiros', qt(s.em_terceiros) + ' un',
          `armazém ${qt(s.em_armazem)} · locação ${qt(s.em_locacao)} · comodato ` +
@@ -560,11 +578,12 @@ async function abrirAba(qual) {
     $('tbl').querySelector('tbody').innerHTML = '<tr><td class="skel">carregando…</td></tr>';
     try {
       const [linhas, aj] = await Promise.all([
-        api(def.rota + '?id=' + encodeURIComponent(arquivoId)),
-        qual === 'produtos' ? api('/api/real/ajustes?id=' + encodeURIComponent(arquivoId))
-                            : Promise.resolve(null)]);
+        api(def.rota + '?id=' + encodeURIComponent(arquivoId) + qsData()),
+        qual === 'produtos' && !dataPos ? api('/api/real/ajustes?id=' + encodeURIComponent(arquivoId))
+                                        : Promise.resolve(null)]);
       dados[qual] = linhas;
       if (aj) ajustes = aj;
+      else if (dataPos && qual === 'produtos') ajustes = [];
     } catch (e) { return falha(e); }
     if (aba !== qual) return;            // trocou de aba enquanto carregava
   }
@@ -800,7 +819,7 @@ async function abrirKardex(cod, descr, alvo) {
                         'Kardex do ERP, com o saldo recalculado linha a linha');
   try {
     const ks = await api(`/api/real/kardex?id=${encodeURIComponent(arquivoId)}` +
-      `&cod=${encodeURIComponent(cod)}&descr=${encodeURIComponent(descr || '')}`);
+      `&cod=${encodeURIComponent(cod)}&descr=${encodeURIComponent(descr || '')}${qsData()}`);
     const neg = ks.filter(k => +k.saldo < 0).length;
     p.corpo.innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.6">
         ${n(ks.length)} movimentos${neg ? ` · <b class="neg">${n(neg)} com o depósito negativo</b> (linhas marcadas)` : ''}.
@@ -966,6 +985,8 @@ $('limpar').onclick = () => {
 
 $('abas').querySelectorAll('[data-aba]').forEach(b => b.onclick = () => abrirAba(b.dataset.aba));
 $('arquivo').onchange = () => carregar($('arquivo').value);
+$('data-pos').onchange = () => { dataPos = $('data-pos').value || ''; carregar(arquivoId); };
+$('data-final').onclick = () => { dataPos = ''; carregar(arquivoId); };
 
 /* --------------------------------------------------------------- exportação */
 $('exportar').onclick = () => {
@@ -975,8 +996,9 @@ $('exportar').onclick = () => {
   const titulo = bt.textContent.replace(/\s*\(.*\)$/, '').trim();
   const total = (dados[aba] || []).length;
   painelExportar({
-    titulo: 'Estoque real — ' + titulo,
+    titulo: 'Estoque real' + (dataPos ? ` em ${brDate(dataPos)}` : '') + ' — ' + titulo,
     subtitulo: (a ? a.textContent.replace(/\s+/g, ' ').trim() : '') +
+               (dataPos ? ` · posição de ${brDate(dataPos)}` : ' · posição final') +
                ` · ${n(vistas.length)} linhas` + (filtrar().length < total ? ' (com filtro)' : '') +
                // O relatório circula sem a tela: o que foi somado e o que foi
                // mexido à mão tem de estar escrito nele.
